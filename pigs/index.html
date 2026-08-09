@@ -149,6 +149,12 @@
 
   .foot{text-align:center;font-size:11px;color:var(--muted);padding:14px 0 4px;line-height:1.5}
 
+  .tag.lead{color:#8A5A00;background:#FFF0CC}
+  .tag.last{color:var(--muted);background:#F3ECE7}
+  .finalbar{background:#FFF6DF;border:1.5px solid #F2DFA8;color:#7A5310;
+    border-radius:var(--r);padding:10px 13px;margin-bottom:12px;font-size:13px;line-height:1.45}
+  .finalbar b{font-weight:800}
+
   /* ---------- celebration layer ---------- */
   #fx{position:fixed;inset:0;pointer-events:none;z-index:100;overflow:hidden}
   .fxp{position:absolute;line-height:1;will-change:transform,opacity;
@@ -295,7 +301,8 @@ var S = {
   flash:null,
   modal:null,
   winner:null,
-  mute:false
+  mute:false,
+  finalBy:null             // who reached the target — everyone else gets one last turn
 };
 
 /* ---------- auto-save (silently skipped if storage is unavailable) ---------- */
@@ -311,7 +318,7 @@ function save(){
     window.localStorage.setItem(KEY, JSON.stringify({
       screen:S.screen, target:S.target, oinkerRule:S.oinkerRule, piggybackRule:S.piggybackRule,
       first:S.first, players:S.players, cur:S.cur, turnPts:S.turnPts, turnRolls:S.turnRolls,
-      winner:S.winner, mute:S.mute
+      winner:S.winner, mute:S.mute, finalBy:S.finalBy
     }));
   } catch(e){}
 }
@@ -338,6 +345,7 @@ function load(){
     S.turnRolls = d.turnRolls || [];
     S.winner = (typeof d.winner === 'number') ? d.winner : null;
     S.mute = !!d.mute;
+    S.finalBy = (typeof d.finalBy === 'number') ? d.finalBy : null;
   } catch(e){}
 }
 
@@ -368,7 +376,11 @@ function actx(){
     MASTER.gain.value = 0.85;
     MASTER.connect(AC.destination);
   }
-  if (AC.state === 'suspended' && AC.resume){ try { AC.resume(); } catch(e){} }
+  if (AC.state === 'suspended' && AC.resume){
+    /* resume() rejects rather than throws, so a try/catch alone would
+       leave an unhandled rejection behind on browsers that refuse it */
+    try { var p = AC.resume(); if (p && p.catch) p.catch(function(){}); } catch(e){}
+  }
   return AC;
 }
 function snd(){ return S.mute ? null : actx(); }
@@ -383,57 +395,144 @@ function noiseBuf(c){
   return NOISE;
 }
 
-/* breathy snort — filtered noise, sits on top of a grunt */
-function puff(at, len, vol){
+/* breath / snort — filtered noise */
+function breath(at, len, vol, freq){
   var c = snd(); if (!c) return;
   var t = c.currentTime + (at || 0);
-  var s = c.createBufferSource(); s.buffer = noiseBuf(c); s.playbackRate.value = 0.85;
-  var f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 0.9;
+  var s = c.createBufferSource(); s.buffer = noiseBuf(c); s.playbackRate.value = 0.9;
+  var f = c.createBiquadFilter(); f.type = 'bandpass';
+  f.frequency.value = freq || 1400; f.Q.value = 1.1;
   var g = c.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, t + len);
   s.connect(f); f.connect(g); g.connect(MASTER);
-  s.start(t, Math.random() * 1.5); s.stop(t + len + 0.02);
+  s.start(t, Math.random() * 1.4); s.stop(t + len + 0.02);
 }
 
-/* one pig grunt: buzzy saw + sub-octave square swept through a bandpass */
-function grunt(o){
+/* Glottal source — a vocal-fold pulse train. Harmonics roll off at
+   roughly -1.15/octave, which is far closer to a real voice than the
+   flat buzz of a raw sawtooth. */
+var GW = null;
+function glottalWave(c){
+  if (GW) return GW;
+  var n = 26, real = new Float32Array(n + 1), imag = new Float32Array(n + 1);
+  for (var i = 1; i <= n; i++) imag[i] = Math.pow(i, -0.95) * (i % 2 ? 1 : 0.72);
+  GW = c.createPeriodicWave(real, imag);
+  return GW;
+}
+
+/* One vocal-tract resonance, gliding across the length of the call. */
+function formant(c, src, dest, f, q, gain, t, len){
+  var b = c.createBiquadFilter();
+  b.type = 'bandpass'; b.Q.value = q;
+  b.frequency.setValueAtTime(f[0], t);
+  b.frequency.linearRampToValueAtTime(f[1], t + len * 0.5);
+  b.frequency.linearRampToValueAtTime(f[2], t + len);
+  var g = c.createGain(); g.gain.value = gain;
+  src.connect(b); b.connect(g); g.connect(dest);
+}
+
+/* =========================================================
+   OINK — formant synthesis, not a filtered beep.
+   Three things make it read as an animal instead of a synth:
+     · jitter — the pitch wobbles a few percent at random, the
+       way real vocal folds do. Perfectly steady pitch is the
+       single biggest giveaway of a synthetic voice.
+     · a sub-octave square mixed in, mimicking the period
+       doubling that gives pig calls their growl.
+     · formants that glide from an open "oi" (low F1, low F2)
+       to a closed nasal "nk" (F1 falling as F2 climbs).
+   ========================================================= */
+function oink(o){
   var c = snd(); if (!c) return;
   o = o || {};
-  var at  = o.at || 0,
-      t   = c.currentTime + at,
-      f0  = o.f   || 330,
-      f1  = o.to  || f0 * 0.45,
-      len = o.len || 0.17,
-      vol = (o.vol == null ? 0.42 : o.vol);
+  var at   = o.at  || 0,
+      t    = c.currentTime + at,
+      len  = o.len || 0.26,
+      vol  = (o.vol == null ? 0.5 : o.vol),
+      base = o.f   || 235,
+      rise = (o.rise == null ? 0.30 : o.rise),
+      fall = (o.fall == null ? 0.60 : o.fall);
 
-  var g = c.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(vol, t + 0.018);
-  g.gain.exponentialRampToValueAtTime(vol * 0.55, t + len * 0.55);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  var env = c.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(vol, t + 0.014);
+  env.gain.setValueAtTime(vol, t + len * 0.5);
+  env.gain.exponentialRampToValueAtTime(vol * 0.7, t + len * 0.82);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + len);   // sharp "k" closure
+  env.connect(MASTER);
 
-  var bp = c.createBiquadFilter();
-  bp.type = 'bandpass'; bp.Q.value = 2.6;
-  bp.frequency.setValueAtTime(f0 * 3.2, t);
-  bp.frequency.exponentialRampToValueAtTime(Math.max(140, f1 * 2.4), t + len);
+  var src = c.createGain(); src.gain.value = 1;
+  /* Upper formants get big gains on purpose: a bandpass sits at 0 dB at
+     its centre, so it can only pass what the source already has — and the
+     source is falling off steeply by 2 kHz. Without the boost the call
+     comes out muffled instead of bright and nasal. */
+  formant(c, src, env, [ 430,  360,  285],  8, 1.00, t, len);
+  formant(c, src, env, [1080, 1480, 1950], 11, 2.60, t, len);
+  formant(c, src, env, [2450, 2520, 2680], 13, 1.60, t, len);
+  var thru = c.createGain(); thru.gain.value = 0.10;        // a little raw buzz
+  src.connect(thru); thru.connect(env);
 
-  var a = c.createOscillator();
-  a.type = 'sawtooth';
-  a.frequency.setValueAtTime(f0, t);
-  a.frequency.exponentialRampToValueAtTime(Math.max(55, f1), t + len * 0.92);
+  var osc = c.createOscillator(); osc.setPeriodicWave(glottalWave(c));
+  var sub = c.createOscillator(); sub.type = 'square';
+  var sg  = c.createGain(); sg.gain.value = 0.14;
 
-  var b = c.createOscillator();
-  b.type = 'square'; b.detune.value = -14;
-  b.frequency.setValueAtTime(f0 * 0.5, t);
-  b.frequency.exponentialRampToValueAtTime(Math.max(35, f1 * 0.5), t + len * 0.92);
-  var bg = c.createGain(); bg.gain.value = 0.3;
+  var steps = Math.max(14, Math.round(len / 0.008)), i, p, tt, f, j;
+  for (i = 0; i <= steps; i++){
+    p  = i / steps; tt = t + p * len;
+    f  = (p < 0.22) ? base * (1 + rise * (p / 0.22))
+                    : base * (1 + rise - (rise + fall) * ((p - 0.22) / 0.78));
+    j  = 1 + (Math.random() * 2 - 1) * 0.05;               // jitter
+    f  = Math.max(55, f * j);
+    osc.frequency.setValueAtTime(f, tt);
+    sub.frequency.setValueAtTime(f * 0.5, tt);
+  }
 
-  a.connect(bp); b.connect(bg); bg.connect(bp); bp.connect(g); g.connect(MASTER);
-  a.start(t); b.start(t); a.stop(t + len + 0.03); b.stop(t + len + 0.03);
+  osc.connect(src); sub.connect(sg); sg.connect(src);
+  osc.start(t); sub.start(t);
+  osc.stop(t + len + 0.03); sub.stop(t + len + 0.03);
 
-  puff(at + 0.005, len * 0.5, vol * 0.5);
+  breath(at, 0.045, vol * 0.35, 1600);                      // snorty onset
+}
+
+/* Panicked squeal — same voice, pitched up and swooping. */
+function squeal(o){
+  var c = snd(); if (!c) return;
+  o = o || {};
+  var at  = o.at || 0, t = c.currentTime + at,
+      len = o.len || 0.45, vol = (o.vol == null ? 0.42 : o.vol),
+      top = o.f || 780;
+
+  var env = c.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+  env.gain.setValueAtTime(vol, t + len * 0.6);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  env.connect(MASTER);
+
+  var src = c.createGain();
+  formant(c, src, env, [ 900, 1150, 1000], 7, 1.00, t, len);
+  formant(c, src, env, [2100, 2500, 2200], 9, 0.50, t, len);
+  var thru = c.createGain(); thru.gain.value = 0.18;
+  src.connect(thru); thru.connect(env);
+
+  var osc = c.createOscillator(); osc.setPeriodicWave(glottalWave(c));
+  var steps = Math.round(len / 0.007), i, p, f;
+  for (i = 0; i <= steps; i++){
+    p = i / steps;
+    f = top * (0.62 + 0.55 * Math.sin(Math.PI * Math.min(1, p * 1.15)));
+    osc.frequency.setValueAtTime(Math.max(120, f * (1 + (Math.random()*2-1) * 0.06)), t + p * len);
+  }
+  osc.connect(src); osc.start(t); osc.stop(t + len + 0.03);
+  breath(at + len * 0.72, 0.09, vol * 0.3, 2600);
+}
+
+/* Short snuffle for taps and skips. */
+function snort(vol, at){
+  vol = vol || 0.2; at = at || 0;
+  breath(at, 0.06, vol, 1200);
+  oink({f:190, len:0.1, vol:vol * 0.9, rise:0.1, fall:0.35, at:at});
 }
 
 function tone(o){
@@ -452,82 +551,107 @@ function tone(o){
   v.start(t); v.stop(t + len + 0.02);
 }
 
-/* bacon in a hot pan: hissing noise with random crackles riding on it */
-function sizzleSound(dur, vol){
+/* =========================================================
+   BACON IN A HOT PAN.
+   Three layers, because frying is not just hiss:
+     · a steady high hiss — the fat boiling off
+     · a low lowpassed rumble — the body of the pan
+     · discrete crackle grains — individual pops, each its own
+       short burst at its own random pitch. Modulating one hiss
+       just sounds like wobbling static; separate grains are what
+       actually reads as bacon.
+   ========================================================= */
+function sizzleSound(dur, vol, at){
   var c = snd(); if (!c) return;
-  var t = c.currentTime;
+  var t = c.currentTime + (at || 0);
+
   var s = c.createBufferSource(); s.buffer = noiseBuf(c); s.loop = true;
-  var hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2600;
-  var bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 5400; bp.Q.value = 0.6;
+  var hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1900;
+  var bed = c.createGain();
+  bed.gain.setValueAtTime(0.0001, t);
+  bed.gain.exponentialRampToValueAtTime(vol, t + 0.08);
+  bed.gain.setValueAtTime(vol, t + dur * 0.65);
+  bed.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(hp); hp.connect(bed); bed.connect(MASTER);
+  s.start(t); s.stop(t + dur + 0.05);
 
-  var body = c.createGain();
-  body.gain.setValueAtTime(0.0001, t);
-  body.gain.exponentialRampToValueAtTime(vol, t + 0.07);
-  body.gain.setValueAtTime(vol, t + dur * 0.62);
-  body.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  var s2 = c.createBufferSource(); s2.buffer = noiseBuf(c); s2.loop = true;
+  var lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+  var pan = c.createGain();
+  pan.gain.setValueAtTime(0.0001, t);
+  pan.gain.exponentialRampToValueAtTime(vol * 0.75, t + 0.1);
+  pan.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s2.connect(lp); lp.connect(pan); pan.connect(MASTER);
+  s2.start(t, 0.7); s2.stop(t + dur + 0.05);
 
-  var pop = c.createGain(); pop.gain.setValueAtTime(1, t);
-  for (var i = 0; i < 34; i++){                    // ascending times, so events stay ordered
-    var at = t + dur * (i + Math.random()) / 34;
-    pop.gain.setValueAtTime(0.5 + Math.random() * 0.35, at);
-    pop.gain.setValueAtTime(1.35 + Math.random() * 0.5, at + 0.012);
+  var n = Math.round(dur * 34), i, at, d, a, b, f, g;
+  for (i = 0; i < n; i++){
+    at = t + dur * (i + Math.random()) / n;
+    d  = 0.006 + Math.random() * 0.02;
+    a  = vol * (0.5 + Math.random() * 1.6);
+    b  = c.createBufferSource(); b.buffer = noiseBuf(c);
+    f  = c.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.value = 1400 + Math.random() * 4600;
+    f.Q.value = 2 + Math.random() * 6;
+    g  = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(a, at + 0.0015);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + d);
+    b.connect(f); f.connect(g); g.connect(MASTER);
+    b.start(at, Math.random() * 1.5); b.stop(at + d + 0.01);
   }
-
-  s.connect(hp); hp.connect(bp); bp.connect(pop); pop.connect(body); body.connect(MASTER);
-  s.start(t); s.stop(t + dur + 0.06);
 }
 
 var SFX = {
-  tap:  function(){ tone({f:520, to:760, len:0.06, vol:0.13, type:'sine'}); },
-  undo: function(){ tone({f:520, to:220, len:0.13, vol:0.16, type:'sine'}); },
-  skip: function(){ tone({f:380, to:200, len:0.16, vol:0.15, type:'sine'}); },
+  tap:  function(){ snort(0.16); },
+  undo: function(){ oink({f:200, len:0.16, vol:0.26, rise:0.05, fall:0.5}); },
+  skip: function(){ snort(0.18); },
 
   /* the pigs get more excited the better the roll */
   roll: function(pts){
-    if (pts <= 1){ grunt({f:255, len:0.13, vol:0.34}); return; }
-    grunt({f:300 + pts * 5, len:0.16, vol:0.4});
-    if (pts >= 10) grunt({f:380 + pts * 5, len:0.15, vol:0.36, at:0.13});
+    if (pts <= 1){ oink({f:200, len:0.2, vol:0.38, rise:0.12, fall:0.45}); return; }
+    oink({f:225 + pts * 3, len:0.25, vol:0.46});
+    if (pts >= 10) oink({f:280 + pts * 3, len:0.24, vol:0.44, at:0.2});
     if (pts >= 20){
-      grunt({f:520, len:0.2, vol:0.42, at:0.27});
-      tone({f:660, len:0.1,  vol:0.2, at:0.30});
-      tone({f:880, len:0.16, vol:0.2, at:0.40});
+      oink({f:360, len:0.26, vol:0.48, at:0.4});
+      oink({f:440, len:0.3,  vol:0.5,  at:0.6, rise:0.35});
     }
   },
-  pigOut: function(){
-    grunt({f:300, to:90, len:0.34, vol:0.42});
-    tone({f:300, to:70, len:0.42, vol:0.18, type:'sawtooth', at:0.05});
-    puff(0.3, 0.22, 0.18);
+  pigOut: function(){                               /* deflating, disappointed */
+    oink({f:250, len:0.3,  vol:0.44, rise:0.06, fall:0.62});
+    oink({f:175, len:0.42, vol:0.4,  rise:0.02, fall:0.68, at:0.26});
+    breath(0.62, 0.26, 0.16, 900);
   },
   sizzle: function(){                               /* oinker — makin' bacon */
-    sizzleSound(1.3, 0.16);
-    grunt({f:430, to:150, len:0.28, vol:0.4});
-    grunt({f:300, to:110, len:0.22, vol:0.3, at:0.26});
+    sizzleSound(1.3, 0.15);
+    squeal({f:820, len:0.42, vol:0.42});
+    oink({f:300, len:0.24, vol:0.36, at:0.46, rise:0.1, fall:0.6});
   },
   thud: function(){                                 /* piggyback */
-    tone({f:150, to:48, len:0.26, vol:0.4, type:'sine'});
-    puff(0.02, 0.12, 0.22);
-    grunt({f:250, to:110, len:0.2, vol:0.34, at:0.1});
+    tone({f:150, to:48, len:0.26, vol:0.36, type:'sine'});
+    breath(0.01, 0.1, 0.2, 800);
+    oink({f:260, len:0.24, vol:0.4, at:0.08, rise:0.05, fall:0.55});
   },
   bank: function(){
-    tone({f:523, len:0.11, vol:0.22});
-    tone({f:659, len:0.11, vol:0.22, at:0.09});
-    tone({f:784, len:0.2,  vol:0.24, at:0.18});
-    grunt({f:360, len:0.15, vol:0.28, at:0.2});
+    oink({f:250, len:0.22, vol:0.42});
+    oink({f:330, len:0.26, vol:0.44, at:0.17});
   },
-  start: function(){ grunt({f:320, len:0.15, vol:0.36}); grunt({f:430, len:0.17, vol:0.36, at:0.14}); },
-  win: function(){
-    var n = [523, 659, 784, 1046], i;
-    for (i = 0; i < n.length; i++) tone({f:n[i], len:0.3, vol:0.26, at:i * 0.13});
-    grunt({f:340, len:0.2,  vol:0.42, at:0.52});
-    grunt({f:430, len:0.2,  vol:0.42, at:0.68});
-    grunt({f:560, len:0.34, vol:0.46, at:0.84});
+  start: function(){
+    oink({f:230, len:0.24, vol:0.42});
+    oink({f:300, len:0.26, vol:0.44, at:0.19});
+  },
+  win: function(){                                  /* a whole sty of them */
+    var f = [240, 300, 380, 470], i;
+    for (i = 0; i < f.length; i++) oink({f:f[i], len:0.26, vol:0.46, at:i * 0.19});
+    squeal({f:900, len:0.5, vol:0.32, at:0.78});
+    for (i = 0; i < 3; i++) tone({f:[523,659,880][i], len:0.4, vol:0.12, at:0.8 + i * 0.1});
   }
 };
 
 function toggleSound(){
   S.mute = !S.mute;
   render();
-  if (!S.mute) grunt({f:340, len:0.16, vol:0.4});   // confirm it's back on
+  if (!S.mute) oink({f:250, len:0.24, vol:0.44});   // confirm it's back on
 }
 
 /* =========================================================
@@ -654,13 +778,21 @@ function bank(){
   p.turns.push({pts:S.turnPts, note:'Banked · '+desc});
   var t = total(p);
   S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  if (t >= S.target){
-    S.winner = S.cur; S.screen = 'win';
-    SFX.win(); render(); fxConfetti();
-    return;
-  }
+
+  /* Reaching the target doesn't end it — it opens the final round,
+     so everyone else gets one last turn to answer. */
+  var opened = false;
+  if (t >= S.target && S.finalBy === null){ S.finalBy = S.cur; opened = true; }
+
   SFX.bank();
   nextPlayer(false);
+  if (S.screen !== 'game') return;                 // final round closed immediately
+  if (opened){
+    S.flash = {kind:'good', title:'Final round! 🏁',
+      sub:esc(name(S.finalBy))+' reached '+S.target+' — one last turn each', fx:'jackpot'};
+    render();
+    fxBurst(10, '🐷');
+  }
   fxFloat('+'+got, '#2FA97F');
 }
 
@@ -671,7 +803,22 @@ function nextPlayer(fromBust){
   do { i = (i + 1) % n; guard++; } while (S.players[i].out && guard <= n);
   S.cur = i;
   if (fromBust) S.flash = null;
+  /* play has come back round to whoever triggered it — everyone has answered */
+  if (S.finalBy !== null && i === S.finalBy){ endGame(); return; }
   render();
+}
+
+/* Highest total takes it. A tie goes to whoever got there first. */
+function endGame(){
+  var best = -Infinity, bi = null;
+  S.players.forEach(function(p, i){
+    if (p.out) return;
+    var t = total(p);
+    if (t > best || (t === best && i === S.finalBy)){ best = t; bi = i; }
+  });
+  if (bi === null) bi = (S.finalBy === null ? 0 : S.finalBy);
+  S.winner = bi; S.screen = 'win'; S.flash = null;
+  SFX.win(); render(); fxConfetti();
 }
 
 function oinker(){
@@ -816,6 +963,7 @@ function startGame(){
   S.players.forEach(function(p,i){ if(!p.name.trim()) p.name = 'Player '+(i+1);
     p.turns = []; p.out = false; });
   S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null; S.winner = null;
+  S.finalBy = null;
   S.screen = 'game'; SFX.start(); render();
 }
 
@@ -826,7 +974,9 @@ function viewGame(){
     var pct = Math.max(0, Math.min(100, t / S.target * 100));
     return '<div class="scorerow '+(i===S.cur?'cur':'')+(p.out?' out':'')+'" onclick="openModal({t:\'hist\',i:'+i+'})">'+
       '<div style="flex:1;min-width:0">'+
-        '<div class="sname">'+esc(name(i))+(p.out?'<span class="tag">out</span>':'')+'</div>'+
+        '<div class="sname">'+esc(name(i))+(p.out?'<span class="tag">out</span>':'')+
+          (S.finalBy===i?'<span class="tag lead">🏁 reached '+S.target+'</span>':'')+
+          (S.finalBy!==null && S.finalBy!==i && !p.out?'<span class="tag last">last turn</span>':'')+'</div>'+
         '<div class="sbar"><i style="width:'+pct+'%"></i></div>'+
       '</div><div class="stot">'+t+'</div></div>';
   }).join('');
@@ -845,7 +995,11 @@ function viewGame(){
       '<b>'+POS[k].name+'</b><s>'+POS[k].sub+'</s></button>';
   }).join('');
 
-  return header(true)+
+  var finalbar = S.finalBy === null ? '' :
+    '<div class="finalbar">🏁 <b>Final round</b> — '+esc(name(S.finalBy))+
+    ' reached '+S.target+'. Highest score when it comes back round wins.</div>';
+
+  return header(true)+ finalbar +
     '<div class="card" style="padding:10px">'+board+
       '<div class="edithint">Tap anyone to edit their scores</div></div>'+
     '<div class="turnbar"><div><div class="who">Now rolling</div><div class="nm">'+esc(name(S.cur))+'</div></div>'+
@@ -872,7 +1026,8 @@ function viewWin(){
   return header(false)+
     '<div class="card win"><div class="crown">🏆</div>'+
       '<h2>'+esc(name(w))+' wins!</h2>'+
-      '<p>'+total(S.players[w])+' points · played to '+S.target+'</p>'+
+      '<p>'+total(S.players[w])+' points · played to '+S.target+
+        (S.finalBy !== null && S.finalBy !== w ? ' · stole it on the final round' : '')+'</p>'+
       '<button class="sec" style="width:100%;margin-bottom:10px" onclick="cycleFirst()">'+
         'Next game, <b>'+esc(firstLabel())+'</b> rolls first &nbsp;\u203A</button>'+
       '<button class="big" onclick="rematch()">Rematch 🐷</button>'+
@@ -887,7 +1042,7 @@ function viewWin(){
 function rematch(){
   S.players.forEach(function(p){ p.turns = []; p.out = false; });
   S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  S.winner = null; S.screen = 'game'; SFX.start(); render();
+  S.winner = null; S.finalBy = null; S.screen = 'game'; SFX.start(); render();
 }
 
 /* ---------- MODALS ---------- */
