@@ -22,8 +22,20 @@
   html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     overscroll-behavior:none;}
-  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);}
-  #app{max-width:520px;margin:0 auto;padding:10px 12px 24px;}
+  /* dvh tracks the address bar sliding in and out on mobile; vh is the fallback */
+  html{height:100%}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
+  #app{max-width:520px;margin:0 auto;padding:10px 12px 12px;width:100%;
+    flex:1;min-height:0;display:flex;flex-direction:column;
+    /* Safety net: in portrait the flex layout fits exactly and this never
+       engages. Somewhere extreme — landscape on a short phone — the
+       minimum sizes can still exceed the window, and scrolling is far
+       better than clipping the Bank button out of reach. */
+    overflow-y:auto;-webkit-overflow-scrolling:touch}
+  /* setup and win can run long — let those scroll normally */
+  #app[data-screen="setup"],#app[data-screen="win"]{display:block;overflow-y:auto;
+    -webkit-overflow-scrolling:touch;padding-bottom:24px}
   button{font-family:inherit;font-size:16px;color:inherit;border:none;background:none;cursor:pointer}
   h1,h2,h3{margin:0}
 
@@ -149,10 +161,91 @@
 
   .foot{text-align:center;font-size:11px;color:var(--muted);padding:14px 0 4px;line-height:1.5}
 
+  /* ---------- fit the game screen to the window ----------
+     Everything the thumb needs holds its size; the pig grid absorbs
+     whatever height is left over, and the scoreboard scrolls inside
+     itself when there are a lot of players. */
+  #app[data-screen="game"] > *{flex:none}
+  /* The pigs are the primary control, so they win the space fight: the
+     grid holds a usable minimum and the scoreboard gives way, scrolling
+     inside itself once there are more players than fit. */
+  #app[data-screen="game"] .boardcard{flex:0 1 auto;min-height:46px;max-height:22vh;
+    overflow-y:auto;-webkit-overflow-scrolling:touch}
+  #app[data-screen="game"] .card{margin-bottom:10px}
+  /* the target is already on every progress bar and in House rules */
+  #app[data-screen="game"] .foot{display:none}
+  /* the flash stays up between rolls, so its size is a permanent cost */
+  #app[data-screen="game"] .flash{padding:9px 12px;margin-bottom:8px;font-size:15px}
+  #app[data-screen="game"] .flash small{font-size:11.5px}
+  #app[data-screen="game"] .turnbar{margin-bottom:10px;padding:9px 15px}
+  #app[data-screen="game"] .turnbar .v{font-size:30px}
+  #app[data-screen="game"] .picklead{margin-bottom:6px}
+  #app[data-screen="game"] .oink{margin-top:6px}
+  #app[data-screen="game"] .oink button{padding:9px 6px}
+  /* don't let them balloon on a tablet */
+  #app[data-screen="game"] .pig svg{max-height:92px}
+  /* past four players, run the scoreboard in two columns — halves its
+     height, so eight players cost the same as four */
+  #app[data-screen="game"] .boardrows.two{display:grid;grid-template-columns:1fr 1fr;gap:4px 7px}
+  #app[data-screen="game"] .boardrows.two .scorerow{margin-bottom:0;padding:5px 7px;gap:6px}
+  #app[data-screen="game"] .boardrows.two .stot{font-size:17px;min-width:30px}
+  #app[data-screen="game"] .boardrows.two .sname{font-size:13px}
+  #app[data-screen="game"] .boardrows.two .tag{font-size:9px;padding:1px 4px;margin-left:4px}
+  /* an odd player out gets the full width rather than a lopsided half */
+  #app[data-screen="game"] .boardrows.two .scorerow:last-child:nth-child(odd){grid-column:1/-1}
+
+  /* past three players, tighten the rows so more fit before it scrolls */
+  #app[data-screen="game"] .boardcard.compact .scorerow{padding:6px 9px;margin-bottom:4px}
+  #app[data-screen="game"] .boardcard.compact .sname{font-size:14px}
+  #app[data-screen="game"] .boardcard.compact .stot{font-size:20px;min-width:44px}
+  #app[data-screen="game"] .boardcard.compact .sbar{height:4px;margin-top:4px}
+  #app[data-screen="game"] .pickcard{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  #app[data-screen="game"] .pickcard .picklead,
+  #app[data-screen="game"] .pickcard .oink{flex:none}
+  #app[data-screen="game"] .pickcard .grid{flex:1 1 auto;min-height:140px;grid-template-rows:1fr 1fr}
+  #app[data-screen="game"] .pig{min-height:0;padding:6px 4px 5px;justify-content:center}
+  #app[data-screen="game"] .pig svg{flex:1 1 0;min-height:22px;max-height:none;height:100%;width:100%}
+  #app[data-screen="game"] .foot{padding:8px 0 0}
+
+  /* short screens: give the pigs room by dropping the trimmings first */
+  @media (max-height:790px){
+    #app[data-screen="game"] .card{margin-bottom:8px}
+    #app[data-screen="game"] .turnbar{margin-bottom:8px;padding:8px 14px}
+    #app[data-screen="game"] .rowbtns{margin-top:7px}
+    #app[data-screen="game"] .edithint{display:none}
+  }
+  @media (max-height:720px){
+    #app[data-screen="game"] .top{padding:2px 2px 7px}
+    #app[data-screen="game"] .iconbtn{width:36px;height:36px;font-size:16px}
+    #app[data-screen="game"] .turnbar .v{font-size:26px}
+    #app[data-screen="game"] .turnbar .nm{font-size:16px}
+    #app[data-screen="game"] .big{padding:13px;font-size:16px}
+    #app[data-screen="game"] .sec{padding:11px;font-size:14px}
+    #app[data-screen="game"] .oink button{padding:7px 6px;font-size:12px}
+    #app[data-screen="game"] .pig b{font-size:11px}
+    #app[data-screen="game"] .pig s{font-size:9px}
+    #app[data-screen="game"] .boardcard{max-height:21vh}
+    #app[data-screen="game"] .flash{padding:7px 11px;font-size:14px;margin-bottom:7px}
+    /* run the detail on the same line rather than stacking it */
+    #app[data-screen="game"] .flash small{display:inline;margin:0 0 0 7px;font-size:12px}
+    #app[data-screen="game"] .oink button{padding:6px}
+    #app[data-screen="game"] .picklead{margin-bottom:5px}
+    #app[data-screen="game"] .pickcard{padding:11px}
+  }
+  @media (max-height:600px){
+    #app[data-screen="game"] .brand span{display:none}
+    #app[data-screen="game"] .flash{padding:7px 11px;font-size:14px}
+    #app[data-screen="game"] .turnbar .who{display:none}
+    #app[data-screen="game"] .oink button b{display:none}
+    #app[data-screen="game"] .pig s{display:none}
+    #app[data-screen="game"] .pickcard{padding:10px}
+  }
+
   .tag.lead{color:#8A5A00;background:#FFF0CC}
   .tag.last{color:var(--muted);background:#F3ECE7}
   .finalbar{background:#FFF6DF;border:1.5px solid #F2DFA8;color:#7A5310;
-    border-radius:var(--r);padding:10px 13px;margin-bottom:12px;font-size:13px;line-height:1.45}
+    border-radius:var(--r);padding:8px 12px;margin-bottom:10px;font-size:13px;line-height:1.35;
+    text-align:center}
   .finalbar b{font-weight:800}
 
   /* ---------- celebration layer ---------- */
@@ -977,7 +1070,15 @@ function render(){
   else if (S.screen === 'win') h = viewWin();
   else h = viewGame();
   if (S.modal) h += viewModal();
-  document.getElementById('app').innerHTML = h;
+  var a = document.getElementById('app');
+  a.setAttribute('data-screen', S.screen);   /* drives the fit-to-window layout */
+  a.innerHTML = h;
+  /* when the scoreboard is tall enough to scroll, keep whoever is rolling
+     in view. block:'nearest' only moves the scoreboard, never the page. */
+  if (S.screen === 'game'){
+    var cur = a.querySelector('.scorerow.cur');
+    if (cur && cur.scrollIntoView) try { cur.scrollIntoView({block:'nearest'}); } catch(e){}
+  }
   save();
 }
 
@@ -1101,17 +1202,19 @@ function viewGame(){
       '<b>'+POS[k].name+'</b><s>'+POS[k].sub+'</s></button>';
   }).join('');
 
-  var finalbar = S.finalBy === null ? '' :
-    '<div class="finalbar">🏁 <b>Final round</b> — '+esc(name(S.finalBy))+
-    ' reached '+S.target+'. Highest score when it comes back round wins.</div>';
+  /* Kept short so it stays one line, and dropped entirely while a flash is
+     up — the 🏁 tag on the scoreboard still says who triggered it. */
+  var finalbar = (S.finalBy === null || S.flash) ? '' :
+    '<div class="finalbar">🏁 <b>Final round</b> — last turn for everyone else</div>';
 
   return header(true)+ finalbar +
-    '<div class="card" style="padding:10px">'+board+
+    '<div class="card boardcard'+(S.players.length > 3 ? ' compact' : '')+'" style="padding:10px">'+
+      '<div class="boardrows'+(S.players.length > 2 ? ' two' : '')+'">'+board+'</div>'+
       '<div class="edithint">Tap anyone to edit their scores</div></div>'+
     '<div class="turnbar"><div><div class="who">Now rolling</div><div class="nm">'+esc(name(S.cur))+'</div></div>'+
       '<div class="turnpts"><div class="v">'+S.turnPts+'</div><div class="l">this turn</div></div></div>'+
     flash+
-    '<div class="card"><div class="picklead">'+lead+'</div><div class="grid">'+grid+'</div>'+
+    '<div class="card pickcard"><div class="picklead">'+lead+'</div><div class="grid">'+grid+'</div>'+
       '<div class="oink">'+
         '<button onclick="oinker()">Oinker 🥓<b>pigs touching</b></button>'+
         '<button onclick="piggyback()">Piggyback<b>one on the other</b></button>'+
