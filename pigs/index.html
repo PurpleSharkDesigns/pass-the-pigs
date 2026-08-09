@@ -1303,6 +1303,17 @@ function setTeams(on){
   if (S.teams) S.players.forEach(function(p,i){ if (p.team !== 0 && p.team !== 1) p.team = i % 2; });
   render();
 }
+/* Switching mode from House rules mid-game: sides have to be assigned and
+   the turn order rebuilt, so it drops you on the setup screen rather than
+   silently half-converting a game in progress. */
+function chooseMode(on){
+  on = !!on;
+  if (on === !!S.teams){ S.modal = null; render(); return; }
+  S.teams = on;
+  if (on) S.players.forEach(function(p,i){ if (p.team !== 0 && p.team !== 1) p.team = i % 2; });
+  S.modal = null; S.screen = 'setup';
+  render();
+}
 
 function settingsRows(){
   return '<div class="setrow"><div class="t">Oinker<s>Pigs touching</s></div>'+
@@ -1525,7 +1536,17 @@ function viewModal(){
   }
   else if (m.t === 'settings'){
     title = 'House rules';
+    /* Mode lives here too, not just on the setup screen — a saved game
+       reopens straight into play, so the setup screen can go unseen for
+       weeks and the toggle would be effectively invisible. */
     body = '<div class="card">'+
+      '<div class="setrow"><div class="t">Mode<s>'+
+          (S.teams?'Two sides, alternating turns':'Every player for themselves')+
+          ' · switching starts a new game</s></div>'+
+        '<div class="seg">'+
+          '<button class="'+(S.teams?'':'on')+'" onclick="chooseMode(false)">Solo</button>'+
+          '<button class="'+(S.teams?'on':'')+'" onclick="chooseMode(true)">🐷 Teams</button>'+
+        '</div></div>'+
       '<div class="setrow"><div class="t">Play to<s>First to reach this wins</s></div>'+
         '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
         '<button onclick="bumpTarget(25)">+</button></div></div>'+
