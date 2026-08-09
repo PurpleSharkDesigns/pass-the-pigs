@@ -148,10 +148,69 @@
   .win p{color:var(--muted);margin:0 0 20px;font-size:15px}
 
   .foot{text-align:center;font-size:11px;color:var(--muted);padding:14px 0 4px;line-height:1.5}
+
+  /* ---------- celebration layer ---------- */
+  #fx{position:fixed;inset:0;pointer-events:none;z-index:100;overflow:hidden}
+  .fxp{position:absolute;line-height:1;will-change:transform,opacity;
+    -webkit-user-select:none;user-select:none}
+
+  @keyframes fxRise{
+    0%{transform:translate(-50%,0) scale(.5) rotate(0);opacity:0}
+    14%{opacity:1;transform:translate(-50%,-14vh) scale(1.05) rotate(-9deg)}
+    100%{transform:translate(-50%,-82vh) scale(.8) rotate(15deg);opacity:0}
+  }
+  @keyframes fxFall{
+    0%{transform:translate(-50%,-14vh) rotate(0);opacity:0}
+    8%{opacity:1}
+    100%{transform:translate(-50%,106vh) rotate(var(--spin,540deg));opacity:.1}
+  }
+  @keyframes fxBurst{
+    0%{transform:translate(-50%,-50%) scale(.3);opacity:0}
+    18%{opacity:1;transform:translate(-50%,-50%) scale(1.15)}
+    100%{transform:translate(calc(-50% + var(--dx,0px)),calc(-50% + var(--dy,0px)))
+         scale(.55) rotate(var(--spin,180deg));opacity:0}
+  }
+  @keyframes fxFloat{
+    0%{transform:translate(-50%,0) scale(.7);opacity:0}
+    22%{opacity:1;transform:translate(-50%,-20px) scale(1.12)}
+    100%{transform:translate(-50%,-104px) scale(1);opacity:0}
+  }
+  @keyframes fxTumble{
+    0%{transform:translate(-50%,-38vh) rotate(0);opacity:0}
+    16%{opacity:1}
+    100%{transform:translate(-50%,62vh) rotate(700deg);opacity:0}
+  }
+
+  @keyframes shake{
+    0%,100%{transform:translateX(0)}
+    12%{transform:translateX(-9px) rotate(-.6deg)}
+    28%{transform:translateX(8px) rotate(.5deg)}
+    44%{transform:translateX(-6px)}
+    60%{transform:translateX(5px)}
+    78%{transform:translateX(-3px)}
+  }
+  .shaking{animation:shake .55s cubic-bezier(.36,.07,.19,.97)}
+
+  /* bacon in the pan: heat sliding across the banner */
+  .flash.sizzle{overflow:hidden;color:#B4472B;
+    background:linear-gradient(100deg,#FBE5E5 0%,#FFE7CC 38%,#FFD9A8 52%,#FFE7CC 66%,#FBE5E5 100%);
+    background-size:260% 100%;animation:pop .28s ease, heat 1.3s linear}
+  @keyframes heat{0%{background-position:0 0}100%{background-position:260% 0}}
+
+  .flash.jackpot{animation:pop .28s ease, glow .9s ease}
+  @keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(47,169,127,0)}
+                  45%{box-shadow:0 0 0 8px rgba(47,169,127,.16)}}
+
+  @media (prefers-reduced-motion: reduce){
+    #fx{display:none}
+    .shaking{animation:none}
+    .flash.sizzle,.flash.jackpot{animation:none}
+  }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="fx" aria-hidden="true"></div>
 <script>
 "use strict";
 
@@ -235,7 +294,8 @@ var S = {
   pending:null,
   flash:null,
   modal:null,
-  winner:null
+  winner:null,
+  mute:false
 };
 
 /* ---------- auto-save (silently skipped if storage is unavailable) ---------- */
@@ -251,7 +311,7 @@ function save(){
     window.localStorage.setItem(KEY, JSON.stringify({
       screen:S.screen, target:S.target, oinkerRule:S.oinkerRule, piggybackRule:S.piggybackRule,
       first:S.first, players:S.players, cur:S.cur, turnPts:S.turnPts, turnRolls:S.turnRolls,
-      winner:S.winner
+      winner:S.winner, mute:S.mute
     }));
   } catch(e){}
 }
@@ -277,6 +337,7 @@ function load(){
     S.turnPts = d.turnPts || 0;
     S.turnRolls = d.turnRolls || [];
     S.winner = (typeof d.winner === 'number') ? d.winner : null;
+    S.mute = !!d.mute;
   } catch(e){}
 }
 
@@ -291,10 +352,268 @@ function esc(s){ return String(s).replace(/[&<>"]/g, function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
 /* =========================================================
+   SOUND — every noise is synthesised on the fly with Web Audio,
+   so the file stays self-contained (no audio files, no base64).
+   The context is created on the first tap, which is what iOS wants.
+   ========================================================= */
+var AC = null, MASTER = null, NOISE = null;
+
+function actx(){
+  if (AC === false) return null;                 // no Web Audio on this device
+  if (!AC){
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C){ AC = false; return null; }
+    try { AC = new C(); } catch(e){ AC = false; return null; }
+    MASTER = AC.createGain();
+    MASTER.gain.value = 0.85;
+    MASTER.connect(AC.destination);
+  }
+  if (AC.state === 'suspended' && AC.resume){ try { AC.resume(); } catch(e){} }
+  return AC;
+}
+function snd(){ return S.mute ? null : actx(); }
+
+function noiseBuf(c){
+  if (!NOISE){
+    var n = Math.floor(c.sampleRate * 2), d;
+    NOISE = c.createBuffer(1, n, c.sampleRate);
+    d = NOISE.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return NOISE;
+}
+
+/* breathy snort — filtered noise, sits on top of a grunt */
+function puff(at, len, vol){
+  var c = snd(); if (!c) return;
+  var t = c.currentTime + (at || 0);
+  var s = c.createBufferSource(); s.buffer = noiseBuf(c); s.playbackRate.value = 0.85;
+  var f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 0.9;
+  var g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  s.connect(f); f.connect(g); g.connect(MASTER);
+  s.start(t, Math.random() * 1.5); s.stop(t + len + 0.02);
+}
+
+/* one pig grunt: buzzy saw + sub-octave square swept through a bandpass */
+function grunt(o){
+  var c = snd(); if (!c) return;
+  o = o || {};
+  var at  = o.at || 0,
+      t   = c.currentTime + at,
+      f0  = o.f   || 330,
+      f1  = o.to  || f0 * 0.45,
+      len = o.len || 0.17,
+      vol = (o.vol == null ? 0.42 : o.vol);
+
+  var g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.018);
+  g.gain.exponentialRampToValueAtTime(vol * 0.55, t + len * 0.55);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+
+  var bp = c.createBiquadFilter();
+  bp.type = 'bandpass'; bp.Q.value = 2.6;
+  bp.frequency.setValueAtTime(f0 * 3.2, t);
+  bp.frequency.exponentialRampToValueAtTime(Math.max(140, f1 * 2.4), t + len);
+
+  var a = c.createOscillator();
+  a.type = 'sawtooth';
+  a.frequency.setValueAtTime(f0, t);
+  a.frequency.exponentialRampToValueAtTime(Math.max(55, f1), t + len * 0.92);
+
+  var b = c.createOscillator();
+  b.type = 'square'; b.detune.value = -14;
+  b.frequency.setValueAtTime(f0 * 0.5, t);
+  b.frequency.exponentialRampToValueAtTime(Math.max(35, f1 * 0.5), t + len * 0.92);
+  var bg = c.createGain(); bg.gain.value = 0.3;
+
+  a.connect(bp); b.connect(bg); bg.connect(bp); bp.connect(g); g.connect(MASTER);
+  a.start(t); b.start(t); a.stop(t + len + 0.03); b.stop(t + len + 0.03);
+
+  puff(at + 0.005, len * 0.5, vol * 0.5);
+}
+
+function tone(o){
+  var c = snd(); if (!c) return;
+  var t = c.currentTime + (o.at || 0), len = o.len || 0.18,
+      vol = (o.vol == null ? 0.3 : o.vol);
+  var g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  var v = c.createOscillator();
+  v.type = o.type || 'triangle';
+  v.frequency.setValueAtTime(o.f, t);
+  if (o.to) v.frequency.exponentialRampToValueAtTime(o.to, t + len);
+  v.connect(g); g.connect(MASTER);
+  v.start(t); v.stop(t + len + 0.02);
+}
+
+/* bacon in a hot pan: hissing noise with random crackles riding on it */
+function sizzleSound(dur, vol){
+  var c = snd(); if (!c) return;
+  var t = c.currentTime;
+  var s = c.createBufferSource(); s.buffer = noiseBuf(c); s.loop = true;
+  var hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2600;
+  var bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 5400; bp.Q.value = 0.6;
+
+  var body = c.createGain();
+  body.gain.setValueAtTime(0.0001, t);
+  body.gain.exponentialRampToValueAtTime(vol, t + 0.07);
+  body.gain.setValueAtTime(vol, t + dur * 0.62);
+  body.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+  var pop = c.createGain(); pop.gain.setValueAtTime(1, t);
+  for (var i = 0; i < 34; i++){                    // ascending times, so events stay ordered
+    var at = t + dur * (i + Math.random()) / 34;
+    pop.gain.setValueAtTime(0.5 + Math.random() * 0.35, at);
+    pop.gain.setValueAtTime(1.35 + Math.random() * 0.5, at + 0.012);
+  }
+
+  s.connect(hp); hp.connect(bp); bp.connect(pop); pop.connect(body); body.connect(MASTER);
+  s.start(t); s.stop(t + dur + 0.06);
+}
+
+var SFX = {
+  tap:  function(){ tone({f:520, to:760, len:0.06, vol:0.13, type:'sine'}); },
+  undo: function(){ tone({f:520, to:220, len:0.13, vol:0.16, type:'sine'}); },
+  skip: function(){ tone({f:380, to:200, len:0.16, vol:0.15, type:'sine'}); },
+
+  /* the pigs get more excited the better the roll */
+  roll: function(pts){
+    if (pts <= 1){ grunt({f:255, len:0.13, vol:0.34}); return; }
+    grunt({f:300 + pts * 5, len:0.16, vol:0.4});
+    if (pts >= 10) grunt({f:380 + pts * 5, len:0.15, vol:0.36, at:0.13});
+    if (pts >= 20){
+      grunt({f:520, len:0.2, vol:0.42, at:0.27});
+      tone({f:660, len:0.1,  vol:0.2, at:0.30});
+      tone({f:880, len:0.16, vol:0.2, at:0.40});
+    }
+  },
+  pigOut: function(){
+    grunt({f:300, to:90, len:0.34, vol:0.42});
+    tone({f:300, to:70, len:0.42, vol:0.18, type:'sawtooth', at:0.05});
+    puff(0.3, 0.22, 0.18);
+  },
+  sizzle: function(){                               /* oinker — makin' bacon */
+    sizzleSound(1.3, 0.16);
+    grunt({f:430, to:150, len:0.28, vol:0.4});
+    grunt({f:300, to:110, len:0.22, vol:0.3, at:0.26});
+  },
+  thud: function(){                                 /* piggyback */
+    tone({f:150, to:48, len:0.26, vol:0.4, type:'sine'});
+    puff(0.02, 0.12, 0.22);
+    grunt({f:250, to:110, len:0.2, vol:0.34, at:0.1});
+  },
+  bank: function(){
+    tone({f:523, len:0.11, vol:0.22});
+    tone({f:659, len:0.11, vol:0.22, at:0.09});
+    tone({f:784, len:0.2,  vol:0.24, at:0.18});
+    grunt({f:360, len:0.15, vol:0.28, at:0.2});
+  },
+  start: function(){ grunt({f:320, len:0.15, vol:0.36}); grunt({f:430, len:0.17, vol:0.36, at:0.14}); },
+  win: function(){
+    var n = [523, 659, 784, 1046], i;
+    for (i = 0; i < n.length; i++) tone({f:n[i], len:0.3, vol:0.26, at:i * 0.13});
+    grunt({f:340, len:0.2,  vol:0.42, at:0.52});
+    grunt({f:430, len:0.2,  vol:0.42, at:0.68});
+    grunt({f:560, len:0.34, vol:0.46, at:0.84});
+  }
+};
+
+function toggleSound(){
+  S.mute = !S.mute;
+  render();
+  if (!S.mute) grunt({f:340, len:0.16, vol:0.4});   // confirm it's back on
+}
+
+/* =========================================================
+   VISUAL FX — DOM particles that clean up after themselves.
+   They live in #fx, outside #app, so a re-render can't wipe them.
+   ========================================================= */
+function motionOK(){
+  try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch(e){ return true; }
+}
+function rnd(a, b){ return a + Math.random() * (b - a); }
+
+function particle(txt, css, life){
+  var box = document.getElementById('fx'); if (!box) return;
+  var el = document.createElement('div');
+  el.className = 'fxp';
+  el.textContent = txt;
+  el.setAttribute('style', css);
+  box.appendChild(el);
+  setTimeout(function(){ if (el.parentNode) el.parentNode.removeChild(el); }, life);
+}
+
+function fxSizzle(){                                 /* bacon curling up out of the pan */
+  if (!motionOK()) return;
+  for (var i = 0; i < 16; i++){
+    particle(Math.random() < 0.72 ? '🥓' : '✨',
+      'left:'+rnd(10,90).toFixed(1)+'%;bottom:-40px;font-size:'+rnd(20,34).toFixed(0)+'px;'+
+      'animation:fxRise '+rnd(1.5,2.3).toFixed(2)+'s ease-out '+rnd(0,0.55).toFixed(2)+'s forwards',
+      3400);
+  }
+}
+function fxConfetti(){
+  if (!motionOK()) return;
+  var bits = ['🐷','🥓','🏆','✨','🎉','🎊'];
+  for (var i = 0; i < 44; i++){
+    particle(bits[i % bits.length],
+      'left:'+rnd(2,98).toFixed(1)+'%;top:0;font-size:'+rnd(16,32).toFixed(0)+'px;'+
+      '--spin:'+rnd(-720,720).toFixed(0)+'deg;'+
+      'animation:fxFall '+rnd(2.2,4).toFixed(2)+'s linear '+rnd(0,1.2).toFixed(2)+'s forwards',
+      6200);
+  }
+}
+function fxBurst(n, ch){
+  if (!motionOK()) return;
+  for (var i = 0; i < n; i++){
+    var a = (Math.PI * 2 * i) / n + rnd(-0.3, 0.3), r = rnd(90, 190);
+    particle(ch,
+      'left:50%;top:42%;font-size:'+rnd(22,34).toFixed(0)+'px;'+
+      '--dx:'+(Math.cos(a)*r).toFixed(0)+'px;--dy:'+(Math.sin(a)*r).toFixed(0)+'px;'+
+      '--spin:'+rnd(-300,300).toFixed(0)+'deg;'+
+      'animation:fxBurst '+rnd(0.7,1.1).toFixed(2)+'s ease-out forwards',
+      1700);
+  }
+}
+function fxTumble(){                                 /* pig out — pig rolls off the screen */
+  if (!motionOK()) return;
+  particle('🐷',
+    'left:50%;top:0;font-size:46px;filter:grayscale(.55);animation:fxTumble 1s ease-in forwards', 1400);
+  for (var i = 0; i < 7; i++){
+    particle('💨',
+      'left:'+rnd(30,70).toFixed(1)+'%;top:52%;font-size:'+rnd(16,26).toFixed(0)+'px;'+
+      '--dx:'+rnd(-120,120).toFixed(0)+'px;--dy:'+rnd(-40,40).toFixed(0)+'px;'+
+      'animation:fxBurst '+rnd(0.6,0.9).toFixed(2)+'s ease-out '+rnd(0.15,0.35).toFixed(2)+'s forwards',
+      1500);
+  }
+}
+function fxFloat(txt, color){
+  if (!motionOK()) return;
+  particle(txt,
+    'left:50%;top:44%;font-size:30px;font-weight:800;color:'+color+';'+
+    'animation:fxFloat 1.1s ease-out forwards', 1400);
+}
+function fxShake(){
+  if (!motionOK()) return;
+  var a = document.getElementById('app'); if (!a) return;
+  a.classList.remove('shaking');
+  void a.offsetWidth;                                // force a reflow so it can replay
+  a.classList.add('shaking');
+  setTimeout(function(){ a.classList.remove('shaking'); }, 620);
+}
+
+/* =========================================================
    ACTIONS
    ========================================================= */
 function pickPig(pose){
-  if (S.pending === null){ S.pending = pose; S.flash = null; render(); return; }
+  if (S.pending === null){ S.pending = pose; S.flash = null; SFX.tap(); render(); return; }
   var a = S.pending, b = pose;
   var r = score(a, b);
   S.pending = null;
@@ -302,14 +621,20 @@ function pickPig(pose){
   if (r.pigOut){
     S.flash = {kind:'bad', title:'Pig Out! 🐷', sub:'Lost '+S.turnPts+' unbanked point'+(S.turnPts===1?'':'s')};
     S.turnPts = 0; S.turnRolls = [];
+    SFX.pigOut();
     render();
+    fxShake(); fxTumble();
     setTimeout(function(){ nextPlayer(true); }, 900);
     return;
   }
   S.turnPts += r.pts;
   S.turnRolls.push({a:a, b:b, pts:r.pts, label:r.label});
-  S.flash = {kind:'good', title:r.label+'  +'+r.pts, sub:'Turn total: '+S.turnPts};
+  S.flash = {kind:'good', title:r.label+'  +'+r.pts, sub:'Turn total: '+S.turnPts,
+             fx:(r.pts >= 20 ? 'jackpot' : '')};
+  SFX.roll(r.pts);
   render();
+  if (r.pts >= 20) fxBurst(12, '🐷');
+  else if (r.pts >= 10) fxBurst(6, '✨');
 }
 
 function undoRoll(){
@@ -318,17 +643,25 @@ function undoRoll(){
   var last = S.turnRolls.pop();
   S.turnPts -= last.pts;
   S.flash = {kind:'bad', title:'Undid '+last.label, sub:'Turn total: '+S.turnPts};
+  SFX.undo();
   render();
 }
 
 function bank(){
   var p = S.players[S.cur];
   var desc = S.turnRolls.length + ' roll' + (S.turnRolls.length===1?'':'s');
+  var got = S.turnPts;
   p.turns.push({pts:S.turnPts, note:'Banked · '+desc});
   var t = total(p);
   S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  if (t >= S.target){ S.winner = S.cur; S.screen = 'win'; render(); return; }
+  if (t >= S.target){
+    S.winner = S.cur; S.screen = 'win';
+    SFX.win(); render(); fxConfetti();
+    return;
+  }
+  SFX.bank();
   nextPlayer(false);
+  fxFloat('+'+got, '#2FA97F');
 }
 
 function nextPlayer(fromBust){
@@ -346,12 +679,14 @@ function oinker(){
   if (S.oinkerRule === 'zero'){
     var t = total(p);
     if (t !== 0) p.turns.push({pts:-t, note:'Oinker — score wiped'});
-    S.flash = {kind:'bad', title:'Makin\u2019 Bacon! 🥓', sub:esc(name(S.cur))+' back to zero, grrr'};
+    S.flash = {kind:'bad', title:'Makin\u2019 Bacon! 🥓', sub:esc(name(S.cur))+' back to zero, grrr', fx:'sizzle'};
   } else {
-    S.flash = {kind:'bad', title:'Oinker!', sub:'Turn points lost'};
+    S.flash = {kind:'bad', title:'Oinker! 🥓', sub:'Turn points lost', fx:'sizzle'};
   }
   S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  SFX.sizzle();
   render();
+  fxSizzle();
   setTimeout(function(){ nextPlayer(true); }, 1100);
 }
 
@@ -365,10 +700,15 @@ function piggyback(){
     S.flash = {kind:'bad', title:'Piggyback!', sub:'Turn points lost'};
   }
   S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  SFX.thud();
   render();
+  fxShake();
   var alive = S.players.filter(function(x){ return !x.out; });
   if (alive.length === 1){
-    setTimeout(function(){ S.winner = S.players.indexOf(alive[0]); S.screen='win'; render(); }, 1100);
+    setTimeout(function(){
+      S.winner = S.players.indexOf(alive[0]); S.screen='win';
+      SFX.win(); render(); fxConfetti();
+    }, 1100);
   } else {
     setTimeout(function(){ nextPlayer(true); }, 1100);
   }
@@ -399,6 +739,8 @@ var LOGO = '<svg viewBox="0 0 100 96">'+
 function header(showGear){
   return '<div class="top"><div class="brand">'+LOGO+'<span>Pass the Pigs</span></div>'+
     '<div style="display:flex;gap:8px">'+
+    '<button class="iconbtn" onclick="toggleSound()" aria-label="'+(S.mute?'Turn sound on':'Turn sound off')+'">'+
+      (S.mute ? '🔇' : '🔊')+'</button>'+
     (showGear ? '<button class="iconbtn" onclick="openModal({t:\'settings\'})">⚙️</button>'+
                 '<button class="iconbtn" onclick="openModal({t:\'newgame\'})">↺</button>' : '')+
     '</div></div>';
@@ -450,6 +792,11 @@ function settingsRows(){
       '<div class="seg">'+
         '<button class="'+(S.piggybackRule==='out'?'on':'')+'" onclick="S.piggybackRule=\'out\';render()">Out</button>'+
         '<button class="'+(S.piggybackRule==='turn'?'on':'')+'" onclick="S.piggybackRule=\'turn\';render()">Lose turn</button>'+
+      '</div></div>'+
+    '<div class="setrow"><div class="t">Pig noises<s>Oinks, sizzles and cheering</s></div>'+
+      '<div class="seg">'+
+        '<button class="'+(S.mute?'':'on')+'" onclick="if(S.mute)toggleSound()">On</button>'+
+        '<button class="'+(S.mute?'on':'')+'" onclick="if(!S.mute)toggleSound()">Off</button>'+
       '</div></div>';
 }
 
@@ -469,7 +816,7 @@ function startGame(){
   S.players.forEach(function(p,i){ if(!p.name.trim()) p.name = 'Player '+(i+1);
     p.turns = []; p.out = false; });
   S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null; S.winner = null;
-  S.screen = 'game'; render();
+  S.screen = 'game'; SFX.start(); render();
 }
 
 /* ---------- GAME ---------- */
@@ -484,7 +831,8 @@ function viewGame(){
       '</div><div class="stot">'+t+'</div></div>';
   }).join('');
 
-  var flash = S.flash ? '<div class="flash '+(S.flash.kind==='good'?'good':'bad')+'">'+
+  var flash = S.flash ? '<div class="flash '+(S.flash.kind==='good'?'good':'bad')+
+    (S.flash.fx ? ' '+S.flash.fx : '')+'">'+
     '<div>'+S.flash.title+'<small>'+S.flash.sub+'</small></div></div>' : '';
 
   var lead = S.pending === null
@@ -516,7 +864,7 @@ function viewGame(){
     '</div>'+
     '<div class="foot">Playing to '+S.target+' points</div>';
 }
-function confirmSkip(){ S.flash = null; return true; }
+function confirmSkip(){ S.flash = null; SFX.skip(); return true; }
 
 /* ---------- WIN ---------- */
 function viewWin(){
@@ -539,7 +887,7 @@ function viewWin(){
 function rematch(){
   S.players.forEach(function(p){ p.turns = []; p.out = false; });
   S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  S.winner = null; S.screen = 'game'; render();
+  S.winner = null; S.screen = 'game'; SFX.start(); render();
 }
 
 /* ---------- MODALS ---------- */
