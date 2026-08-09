@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pigs">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FDF6F0">
+<title>Pass the Pigs — Scorekeeper</title>
+<style>
+  :root{
+    --bg:#FDF6F0; --card:#fff; --ink:#2E2A28; --muted:#8A7F7A;
+    --pink:#E8698A; --pink-deep:#C7466A; --pink-soft:#FBE3EA;
+    --green:#2FA97F; --green-soft:#E1F4EC;
+    --red:#D64545; --red-soft:#FBE5E5;
+    --line:#EFE2DA; --shadow:0 2px 10px rgba(80,50,40,.08);
+    --r:16px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    overscroll-behavior:none;}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);}
+  #app{max-width:520px;margin:0 auto;padding:10px 12px 24px;}
+  button{font-family:inherit;font-size:16px;color:inherit;border:none;background:none;cursor:pointer}
+  h1,h2,h3{margin:0}
+
+  /* ---------- header ---------- */
+  .top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 2px 12px}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .brand svg{width:26px;height:26px}
+  .iconbtn{width:40px;height:40px;border-radius:12px;background:#fff;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);font-size:18px}
+  .iconbtn:active{transform:scale(.95)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:14px;margin-bottom:12px}
+  .label{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+
+  /* ---------- setup ---------- */
+  .prow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .pnum{width:38px;height:38px;flex:none;border-radius:50%;background:#F6EFEA;color:var(--muted);
+    font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;
+    border:1.5px solid var(--line)}
+  .pnum.on{background:var(--pink);color:#fff;border-color:var(--pink);font-size:12px}
+  .pnum:active{transform:scale(.92)}
+  .prow input{flex:1;min-width:0;padding:12px 12px;border:1px solid var(--line);border-radius:12px;
+    font-size:16px;background:#FFFDFC;color:var(--ink)}
+  .prow input:focus{outline:2px solid var(--pink);outline-offset:-1px}
+  .xbtn{width:34px;height:34px;flex:none;border-radius:10px;color:var(--muted);font-size:20px;line-height:1}
+  .ghost{width:100%;padding:12px;border:1.5px dashed var(--line);border-radius:12px;color:var(--muted);font-weight:600}
+  .big{width:100%;padding:17px;border-radius:14px;background:var(--pink);color:#fff;font-weight:800;font-size:17px;
+    box-shadow:0 3px 0 var(--pink-deep)}
+  .big:active{transform:translateY(2px);box-shadow:0 1px 0 var(--pink-deep)}
+  .big.green{background:var(--green);box-shadow:0 3px 0 #1F8A66}
+  .big.green:active{box-shadow:0 1px 0 #1F8A66}
+  .big[disabled]{background:#DCD3CE;box-shadow:0 3px 0 #C6BAB3;color:#fff}
+
+  /* ---------- scoreboard ---------- */
+  .scorerow{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:12px;border:1.5px solid transparent;margin-bottom:6px}
+  .scorerow:last-child{margin-bottom:0}
+  .scorerow.cur{border-color:var(--pink);background:var(--pink-soft)}
+  .scorerow.out{opacity:.45}
+  .sname{flex:1;min-width:0;font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sbar{height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden}
+  .sbar i{display:block;height:100%;background:var(--pink);border-radius:3px;transition:width .3s}
+  .stot{font-weight:800;font-size:24px;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+  .edithint{font-size:11px;color:var(--muted);text-align:center;margin-top:8px}
+  .tag{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--red);
+    background:var(--red-soft);padding:2px 6px;border-radius:6px;margin-left:6px}
+
+  /* ---------- turn bar ---------- */
+  .turnbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--ink);color:#fff;border-radius:var(--r);padding:12px 16px;margin-bottom:12px}
+  .turnbar .who{font-size:12px;opacity:.65;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .turnbar .nm{font-size:18px;font-weight:800;margin-top:2px}
+  .turnpts{text-align:right}
+  .turnpts .v{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .turnpts .l{font-size:11px;opacity:.65;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+
+  /* ---------- pig picker ---------- */
+  .picklead{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .step{font-weight:800;font-size:15px}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--pink-soft);color:var(--pink-deep);
+    border-radius:999px;padding:5px 8px 5px 5px;font-size:13px;font-weight:700}
+  .chip svg{width:26px;height:26px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .pig{background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:8px 4px 7px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;box-shadow:var(--shadow)}
+  .pig:active{transform:scale(.96);border-color:var(--pink)}
+  .pig svg{width:100%;height:auto;max-height:62px}
+  .pig b{font-size:11.5px;font-weight:700;line-height:1.15;text-align:center}
+  .pig s{font-size:10px;color:var(--muted);text-decoration:none;font-weight:700}
+  .oink{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .oink button{padding:11px 6px;border-radius:12px;background:var(--red-soft);color:var(--red);
+    font-weight:800;font-size:13px;border:1.5px solid #F3CFCF}
+  .oink button b{display:block;font-size:10px;font-weight:600;opacity:.8;margin-top:2px}
+
+  /* ---------- flash ---------- */
+  .flash{border-radius:var(--r);padding:12px 14px;margin-bottom:12px;font-weight:800;font-size:16px;
+    display:flex;align-items:center;justify-content:space-between;gap:10px;animation:pop .28s ease}
+  .flash.good{background:var(--green-soft);color:#1B6E53}
+  .flash.bad{background:var(--red-soft);color:var(--red)}
+  .flash small{font-weight:600;font-size:12px;opacity:.85;display:block;margin-top:2px}
+  @keyframes pop{from{transform:scale(.96);opacity:0}to{transform:scale(1);opacity:1}}
+
+  .rowbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .sec{padding:14px;border-radius:14px;background:#fff;border:1.5px solid var(--line);font-weight:700;font-size:15px;box-shadow:var(--shadow)}
+  .sec:active{transform:scale(.97)}
+  .sec[disabled]{opacity:.4}
+
+  /* ---------- modal ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(46,42,40,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+  .sheet{background:var(--bg);width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:16px 14px calc(20px + env(safe-area-inset-bottom));
+    max-height:88vh;overflow-y:auto;animation:up .25s ease}
+  @keyframes up{from{transform:translateY(30px);opacity:.4}to{transform:translateY(0);opacity:1}}
+  .sheethead{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .sheethead h2{font-size:19px;font-weight:800}
+  .hrow{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);
+    border-radius:12px;padding:9px 10px;margin-bottom:7px}
+  .hrow .d{flex:1;min-width:0}
+  .hrow .d b{display:block;font-size:14px;font-weight:700}
+  .hrow .d s{display:block;font-size:11.5px;color:var(--muted);text-decoration:none;margin-top:1px}
+  .hrow input{width:66px;padding:9px 6px;text-align:center;font-size:16px;font-weight:800;
+    border:1px solid var(--line);border-radius:10px;background:#FFFDFC;color:var(--ink);font-variant-numeric:tabular-nums}
+  .hrow input:focus{outline:2px solid var(--pink);outline-offset:-1px}
+  .del{width:36px;height:36px;flex:none;border-radius:10px;background:var(--red-soft);color:var(--red);font-size:17px;font-weight:800}
+  .empty{text-align:center;color:var(--muted);font-size:14px;padding:18px 0}
+  .totline{display:flex;justify-content:space-between;align-items:center;padding:12px 4px 4px;font-weight:800;font-size:17px}
+
+  .setrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;border-bottom:1px solid var(--line)}
+  .setrow:last-child{border-bottom:none}
+  .setrow .t{font-size:15px;font-weight:700}
+  .setrow .t s{display:block;font-size:12px;color:var(--muted);font-weight:500;text-decoration:none;margin-top:2px}
+  .seg{display:flex;background:var(--line);border-radius:11px;padding:3px;flex:none}
+  .seg button{padding:8px 11px;border-radius:9px;font-size:13px;font-weight:700;color:var(--muted)}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .stepper{display:flex;align-items:center;gap:6px;flex:none}
+  .stepper button{width:38px;height:38px;border-radius:11px;background:#fff;border:1px solid var(--line);font-size:20px;font-weight:800}
+  .stepper span{min-width:44px;text-align:center;font-weight:800;font-size:17px;font-variant-numeric:tabular-nums}
+
+  /* ---------- win ---------- */
+  .win{text-align:center;padding:26px 14px}
+  .win .crown{font-size:52px}
+  .win h2{font-size:27px;font-weight:800;margin:8px 0 4px}
+  .win p{color:var(--muted);margin:0 0 20px;font-size:15px}
+
+  .foot{text-align:center;font-size:11px;color:var(--muted);padding:14px 0 4px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+
+/* =========================================================
+   PIG ART — one profile pig, posed six ways
+   ========================================================= */
+function pigSVG(pose, size){
+  var lying = (pose === 'sideUp' || pose === 'sideDown');
+  var t = {
+    trotter:   'translate(0,2)',
+    razorback: 'translate(0,14) rotate(180,50,52)',
+    sideUp:    'translate(0,20) rotate(-4,50,52)',
+    sideDown:  'translate(0,20) rotate(-4,50,52)',
+    snouter:   'translate(-13,10) rotate(52,50,50)',
+    jowler:    'translate(-14,6) rotate(112,50,50)'
+  }[pose];
+
+  // standing legs vs. foreshortened hooves of a pig lying on its side
+  var L = !lying
+    ? '<rect x="27" y="60" width="9" height="19" rx="4"/><rect x="39" y="60" width="9" height="19" rx="4"/>'+
+      '<rect x="53" y="60" width="9" height="19" rx="4"/><rect x="64" y="60" width="9" height="19" rx="4"/>'
+    : '<ellipse cx="33" cy="64" rx="5.5" ry="4"/><ellipse cx="45" cy="66" rx="5.5" ry="4"/>'+
+      '<ellipse cx="57" cy="66" rx="5.5" ry="4"/><ellipse cx="68" cy="64" rx="5.5" ry="4"/>';
+
+  var dot = pose === 'sideUp'
+    ? '<circle cx="40" cy="53" r="4.6" fill="#3B2B2B"/>' : '';
+
+  return '<svg viewBox="0 0 100 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'+
+    '<line x1="7" y1="88" x2="93" y2="88" stroke="#E3D3CA" stroke-width="3" stroke-linecap="round"/>'+
+    '<g transform="'+t+'" fill="#F2A6BC">'+
+      L+
+      '<path d="M23 46 q-9 -5 -5 -11 q4 -6 9 0" fill="none" stroke="#F2A6BC" stroke-width="4.5" stroke-linecap="round"/>'+
+      '<ellipse cx="46" cy="52" rx="27" ry="17.5"/>'+
+      '<path d="M64 35 L71 22 L79 36 Z"/>'+
+      '<circle cx="73" cy="47" r="13"/>'+
+      '<ellipse cx="86.5" cy="50" rx="7.5" ry="6.5" fill="#E58AA4"/>'+
+      '<circle cx="88" cy="48" r="1.5" fill="#B5566F"/><circle cx="88" cy="53" r="1.5" fill="#B5566F"/>'+
+      '<circle cx="70" cy="45" r="1.9" fill="#3B2B2B"/>'+
+      dot+
+    '</g></svg>';
+}
+
+/* =========================================================
+   SCORING
+   ========================================================= */
+var POS = {
+  sideUp:   {name:'Sider',      sub:'dot up',    v:0, side:true},
+  sideDown: {name:'Sider',      sub:'no dot',    v:0, side:true},
+  razorback:{name:'Razorback',  sub:'on back',   v:5},
+  trotter:  {name:'Trotter',    sub:'standing',  v:5},
+  snouter:  {name:'Snouter',    sub:'on snout',  v:10},
+  jowler:   {name:'Jowler',     sub:'leaning',   v:15}
+};
+var ORDER = ['sideUp','sideDown','razorback','trotter','snouter','jowler'];
+var DOUBLE = {razorback:20, trotter:20, snouter:40, jowler:60};
+
+function score(a, b){
+  var A = POS[a], B = POS[b];
+  if (A.side && B.side){
+    if (a === b) return {pts:1, label:'Sider', note:'Both pigs on the same side'};
+    return {pts:0, pigOut:true, label:'Pig Out!', note:'One dot up, one dot down — turn over'};
+  }
+  if (a === b) return {pts:DOUBLE[a], label:'Double '+A.name+'!', note:'Both pigs '+A.name.toLowerCase()};
+  var nm = A.side ? B.name+' + Sider' : (B.side ? A.name+' + Sider' : A.name+' + '+B.name);
+  return {pts:A.v + B.v, label:nm, note:'Mixed landing'};
+}
+
+/* =========================================================
+   STATE
+   ========================================================= */
+var S = {
+  screen:'setup',
+  target:100,
+  oinkerRule:'zero',
+  piggybackRule:'out',
+  first:0,                 // index of who rolls first, or 'random'
+  players:[{name:'',turns:[],out:false},{name:'',turns:[],out:false}],
+  cur:0,
+  turnPts:0,
+  turnRolls:[],
+  pending:null,
+  flash:null,
+  modal:null,
+  winner:null
+};
+
+/* ---------- auto-save (silently skipped if storage is unavailable) ---------- */
+var KEY = 'passthepigs.v1';
+var CAN_SAVE = (function(){
+  try { var s = window.localStorage; s.setItem('__t','1'); s.removeItem('__t'); return true; }
+  catch(e){ return false; }
+})();
+
+function save(){
+  if (!CAN_SAVE) return;
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify({
+      screen:S.screen, target:S.target, oinkerRule:S.oinkerRule, piggybackRule:S.piggybackRule,
+      first:S.first, players:S.players, cur:S.cur, turnPts:S.turnPts, turnRolls:S.turnRolls,
+      winner:S.winner
+    }));
+  } catch(e){}
+}
+
+function load(){
+  if (!CAN_SAVE) return;
+  var raw;
+  try { raw = window.localStorage.getItem(KEY); } catch(e){ return; }
+  if (!raw) return;
+  try {
+    var d = JSON.parse(raw);
+    if (!d || !d.players || !d.players.length) return;
+    S.screen = d.screen || 'setup';
+    S.target = d.target || 100;
+    S.oinkerRule = d.oinkerRule || 'zero';
+    S.piggybackRule = d.piggybackRule || 'out';
+    S.first = (d.first === 'random') ? 'random' : (d.first || 0);
+    S.players = d.players.map(function(p){
+      return { name: p.name || '', out: !!p.out,
+        turns: (p.turns || []).map(function(t){ return {pts: t.pts|0, note: t.note || ''}; }) };
+    });
+    S.cur = Math.min(d.cur || 0, S.players.length - 1);
+    S.turnPts = d.turnPts || 0;
+    S.turnRolls = d.turnRolls || [];
+    S.winner = (typeof d.winner === 'number') ? d.winner : null;
+  } catch(e){}
+}
+
+function wipeSave(){ if (CAN_SAVE) try { window.localStorage.removeItem(KEY); } catch(e){} }
+function firstIndex(){
+  if (S.first === 'random') return Math.floor(Math.random() * S.players.length);
+  return Math.max(0, Math.min(S.first, S.players.length - 1));
+}
+
+function total(p){ var t=0; for(var i=0;i<p.turns.length;i++) t += p.turns[i].pts; return t; }
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* =========================================================
+   ACTIONS
+   ========================================================= */
+function pickPig(pose){
+  if (S.pending === null){ S.pending = pose; S.flash = null; render(); return; }
+  var a = S.pending, b = pose;
+  var r = score(a, b);
+  S.pending = null;
+
+  if (r.pigOut){
+    S.flash = {kind:'bad', title:'Pig Out! 🐷', sub:'Lost '+S.turnPts+' unbanked point'+(S.turnPts===1?'':'s')};
+    S.turnPts = 0; S.turnRolls = [];
+    render();
+    setTimeout(function(){ nextPlayer(true); }, 900);
+    return;
+  }
+  S.turnPts += r.pts;
+  S.turnRolls.push({a:a, b:b, pts:r.pts, label:r.label});
+  S.flash = {kind:'good', title:r.label+'  +'+r.pts, sub:'Turn total: '+S.turnPts};
+  render();
+}
+
+function undoRoll(){
+  if (S.pending !== null){ S.pending = null; S.flash = null; render(); return; }
+  if (!S.turnRolls.length) return;
+  var last = S.turnRolls.pop();
+  S.turnPts -= last.pts;
+  S.flash = {kind:'bad', title:'Undid '+last.label, sub:'Turn total: '+S.turnPts};
+  render();
+}
+
+function bank(){
+  var p = S.players[S.cur];
+  var desc = S.turnRolls.length + ' roll' + (S.turnRolls.length===1?'':'s');
+  p.turns.push({pts:S.turnPts, note:'Banked · '+desc});
+  var t = total(p);
+  S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
+  if (t >= S.target){ S.winner = S.cur; S.screen = 'win'; render(); return; }
+  nextPlayer(false);
+}
+
+function nextPlayer(fromBust){
+  S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  if (!fromBust) S.flash = null;
+  var n = S.players.length, i = S.cur, guard = 0;
+  do { i = (i + 1) % n; guard++; } while (S.players[i].out && guard <= n);
+  S.cur = i;
+  if (fromBust) S.flash = null;
+  render();
+}
+
+function oinker(){
+  var p = S.players[S.cur];
+  if (S.oinkerRule === 'zero'){
+    var t = total(p);
+    if (t !== 0) p.turns.push({pts:-t, note:'Oinker — score wiped'});
+    S.flash = {kind:'bad', title:'Makin\u2019 Bacon! 🥓', sub:esc(name(S.cur))+' back to zero, grrr'};
+  } else {
+    S.flash = {kind:'bad', title:'Oinker!', sub:'Turn points lost'};
+  }
+  S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  render();
+  setTimeout(function(){ nextPlayer(true); }, 1100);
+}
+
+function piggyback(){
+  var p = S.players[S.cur];
+  if (S.piggybackRule === 'out'){
+    p.out = true;
+    p.turns.push({pts:0, note:'Piggyback — out of the game'});
+    S.flash = {kind:'bad', title:'Piggyback!', sub:esc(name(S.cur))+' is out of the game'};
+  } else {
+    S.flash = {kind:'bad', title:'Piggyback!', sub:'Turn points lost'};
+  }
+  S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  render();
+  var alive = S.players.filter(function(x){ return !x.out; });
+  if (alive.length === 1){
+    setTimeout(function(){ S.winner = S.players.indexOf(alive[0]); S.screen='win'; render(); }, 1100);
+  } else {
+    setTimeout(function(){ nextPlayer(true); }, 1100);
+  }
+}
+
+function name(i){ return S.players[i].name || ('Player ' + (i+1)); }
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+function render(){
+  var h = '';
+  if (S.screen === 'setup') h = viewSetup();
+  else if (S.screen === 'win') h = viewWin();
+  else h = viewGame();
+  if (S.modal) h += viewModal();
+  document.getElementById('app').innerHTML = h;
+  save();
+}
+
+var LOGO = '<svg viewBox="0 0 100 96">'+
+  '<ellipse cx="50" cy="52" rx="30" ry="22" fill="#E8698A"/>'+
+  '<path d="M28 32 L26 16 L42 26 Z" fill="#E8698A"/><path d="M72 32 L74 16 L58 26 Z" fill="#E8698A"/>'+
+  '<ellipse cx="50" cy="60" rx="13" ry="10" fill="#F7B7C8"/>'+
+  '<circle cx="45" cy="59" r="2.6" fill="#B5566F"/><circle cx="55" cy="59" r="2.6" fill="#B5566F"/>'+
+  '<circle cx="38" cy="44" r="3.4" fill="#3B2B2B"/><circle cx="62" cy="44" r="3.4" fill="#3B2B2B"/></svg>';
+
+function header(showGear){
+  return '<div class="top"><div class="brand">'+LOGO+'<span>Pass the Pigs</span></div>'+
+    '<div style="display:flex;gap:8px">'+
+    (showGear ? '<button class="iconbtn" onclick="openModal({t:\'settings\'})">⚙️</button>'+
+                '<button class="iconbtn" onclick="openModal({t:\'newgame\'})">↺</button>' : '')+
+    '</div></div>';
+}
+
+/* ---------- SETUP ---------- */
+function viewSetup(){
+  var rnd = (S.first === 'random');
+  var rows = S.players.map(function(p,i){
+    var isFirst = !rnd && Math.max(0, Math.min(S.first, S.players.length-1)) === i;
+    return '<div class="prow">'+
+      '<button class="pnum'+(isFirst?' on':'')+'" onclick="setFirst('+i+')">'+(isFirst?'1st':(i+1))+'</button>'+
+      '<input id="pn'+i+'" value="'+esc(p.name)+'" placeholder="Player '+(i+1)+'" '+
+      'oninput="S.players['+i+'].name=this.value;save()" autocomplete="off" autocapitalize="words">'+
+      (S.players.length > 2 ? '<button class="xbtn" onclick="rmPlayer('+i+')">\u2715</button>' : '')+
+      '</div>';
+  }).join('');
+
+  return header(false)+
+    '<div class="card"><div class="label">Who\u2019s playing?</div>'+rows+
+      (S.players.length < 8 ? '<button class="ghost" onclick="addPlayer()">+ Add player</button>' : '')+
+      '<div class="setrow" style="border-top:1px solid var(--line);margin-top:10px">'+
+        '<div class="t">Rolls first<s>'+(rnd ? 'A different player each game' : 'Tap a number above to change')+'</s></div>'+
+        '<div class="seg">'+
+          '<button class="'+(rnd?'':'on')+'" onclick="setFirst(S.first===\'random\'?0:S.first)">Pick</button>'+
+          '<button class="'+(rnd?'on':'')+'" onclick="S.first=\'random\';render()">\ud83c\udfb2 Random</button>'+
+        '</div></div>'+
+    '</div>'+
+    '<div class="card">'+
+      '<div class="setrow"><div class="t">Play to<s>First to reach this wins</s></div>'+
+        '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
+        '<button onclick="bumpTarget(25)">+</button></div></div>'+
+      settingsRows()+
+    '</div>'+
+    '<button class="big" onclick="startGame()">Start game 🐷</button>'+
+    '<div class="foot">Tap a player mid-game to fix any score.'+
+      (CAN_SAVE ? '<br>Scores save automatically on this phone.' : '')+
+      '<br>Made for John · Purple Shark Designs</div>';
+}
+function setFirst(i){ S.first = Math.max(0, Math.min(i, S.players.length-1)); render(); }
+
+function settingsRows(){
+  return '<div class="setrow"><div class="t">Oinker<s>Pigs touching</s></div>'+
+      '<div class="seg">'+
+        '<button class="'+(S.oinkerRule==='zero'?'on':'')+'" onclick="S.oinkerRule=\'zero\';render()">Lose all</button>'+
+        '<button class="'+(S.oinkerRule==='turn'?'on':'')+'" onclick="S.oinkerRule=\'turn\';render()">Lose turn</button>'+
+      '</div></div>'+
+    '<div class="setrow"><div class="t">Piggyback<s>One pig on the other</s></div>'+
+      '<div class="seg">'+
+        '<button class="'+(S.piggybackRule==='out'?'on':'')+'" onclick="S.piggybackRule=\'out\';render()">Out</button>'+
+        '<button class="'+(S.piggybackRule==='turn'?'on':'')+'" onclick="S.piggybackRule=\'turn\';render()">Lose turn</button>'+
+      '</div></div>';
+}
+
+function addPlayer(){ S.players.push({name:'',turns:[],out:false}); render(); }
+function rmPlayer(i){ S.players.splice(i,1);
+  if (S.first !== 'random') S.first = Math.max(0, Math.min(S.first, S.players.length-1));
+  render(); }
+function cycleFirst(){
+  if (S.first === 'random') S.first = 0;
+  else if (S.first < S.players.length - 1) S.first = S.first + 1;
+  else S.first = 'random';
+  render();
+}
+function firstLabel(){ return S.first === 'random' ? '\ud83c\udfb2 Random' : name(Math.max(0,Math.min(S.first,S.players.length-1))); }
+function bumpTarget(d){ S.target = Math.max(25, Math.min(500, S.target + d)); render(); }
+function startGame(){
+  S.players.forEach(function(p,i){ if(!p.name.trim()) p.name = 'Player '+(i+1);
+    p.turns = []; p.out = false; });
+  S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null; S.winner = null;
+  S.screen = 'game'; render();
+}
+
+/* ---------- GAME ---------- */
+function viewGame(){
+  var board = S.players.map(function(p,i){
+    var t = total(p);
+    var pct = Math.max(0, Math.min(100, t / S.target * 100));
+    return '<div class="scorerow '+(i===S.cur?'cur':'')+(p.out?' out':'')+'" onclick="openModal({t:\'hist\',i:'+i+'})">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="sname">'+esc(name(i))+(p.out?'<span class="tag">out</span>':'')+'</div>'+
+        '<div class="sbar"><i style="width:'+pct+'%"></i></div>'+
+      '</div><div class="stot">'+t+'</div></div>';
+  }).join('');
+
+  var flash = S.flash ? '<div class="flash '+(S.flash.kind==='good'?'good':'bad')+'">'+
+    '<div>'+S.flash.title+'<small>'+S.flash.sub+'</small></div></div>' : '';
+
+  var lead = S.pending === null
+    ? '<span class="step">Where did pig 1 land?</span>'
+    : '<span class="step">And pig 2?</span><span class="chip" onclick="S.pending=null;render()">'+
+      pigSVG(S.pending)+POS[S.pending].name+' ✕</span>';
+
+  var grid = ORDER.map(function(k){
+    return '<button class="pig" onclick="pickPig(\''+k+'\')">'+pigSVG(k)+
+      '<b>'+POS[k].name+'</b><s>'+POS[k].sub+'</s></button>';
+  }).join('');
+
+  return header(true)+
+    '<div class="card" style="padding:10px">'+board+
+      '<div class="edithint">Tap anyone to edit their scores</div></div>'+
+    '<div class="turnbar"><div><div class="who">Now rolling</div><div class="nm">'+esc(name(S.cur))+'</div></div>'+
+      '<div class="turnpts"><div class="v">'+S.turnPts+'</div><div class="l">this turn</div></div></div>'+
+    flash+
+    '<div class="card"><div class="picklead">'+lead+'</div><div class="grid">'+grid+'</div>'+
+      '<div class="oink">'+
+        '<button onclick="oinker()">Oinker 🥓<b>pigs touching</b></button>'+
+        '<button onclick="piggyback()">Piggyback<b>one on the other</b></button>'+
+      '</div></div>'+
+    '<button class="big green" onclick="bank()" '+(S.turnPts===0?'disabled':'')+'>'+
+      (S.turnPts===0 ? 'Bank points' : 'Bank '+S.turnPts+' & pass the pigs')+'</button>'+
+    '<div class="rowbtns">'+
+      '<button class="sec" onclick="undoRoll()" '+(!S.turnRolls.length && S.pending===null?'disabled':'')+'>↶ Undo roll</button>'+
+      '<button class="sec" onclick="if(confirmSkip())nextPlayer(true)">Skip turn →</button>'+
+    '</div>'+
+    '<div class="foot">Playing to '+S.target+' points</div>';
+}
+function confirmSkip(){ S.flash = null; return true; }
+
+/* ---------- WIN ---------- */
+function viewWin(){
+  var w = S.winner;
+  return header(false)+
+    '<div class="card win"><div class="crown">🏆</div>'+
+      '<h2>'+esc(name(w))+' wins!</h2>'+
+      '<p>'+total(S.players[w])+' points · played to '+S.target+'</p>'+
+      '<button class="sec" style="width:100%;margin-bottom:10px" onclick="cycleFirst()">'+
+        'Next game, <b>'+esc(firstLabel())+'</b> rolls first &nbsp;\u203A</button>'+
+      '<button class="big" onclick="rematch()">Rematch 🐷</button>'+
+      '<div style="height:8px"></div>'+
+      '<button class="sec" style="width:100%" onclick="S.screen=\'setup\';render()">Change players</button>'+
+    '</div>'+
+    '<div class="card" style="padding:10px">'+ S.players.map(function(p,i){
+        return '<div class="scorerow" onclick="openModal({t:\'hist\',i:'+i+'})">'+
+          '<div class="sname" style="flex:1">'+esc(name(i))+'</div><div class="stot">'+total(p)+'</div></div>';
+      }).join('') +'</div>';
+}
+function rematch(){
+  S.players.forEach(function(p){ p.turns = []; p.out = false; });
+  S.cur = firstIndex(); S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
+  S.winner = null; S.screen = 'game'; render();
+}
+
+/* ---------- MODALS ---------- */
+function openModal(m){ S.modal = m; render(); }
+function closeModal(){ S.modal = null; render(); }
+
+function viewModal(){
+  var m = S.modal, body = '', title = '';
+  if (m.t === 'hist'){
+    var p = S.players[m.i];
+    title = esc(name(m.i));
+    if (!p.turns.length){
+      body = '<div class="empty">No turns yet — nothing to fix haha</div>';
+    } else {
+      body = p.turns.map(function(t,j){
+        return '<div class="hrow"><div class="d"><b>Turn '+(j+1)+'</b><s>'+esc(t.note)+'</s></div>'+
+          '<input type="number" inputmode="numeric" value="'+t.pts+'" '+
+            'onchange="editTurn('+m.i+','+j+',this.value)">'+
+          '<button class="del" onclick="delTurn('+m.i+','+j+')">✕</button></div>';
+      }).join('');
+    }
+    body += '<div class="hrow" style="border-style:dashed"><div class="d"><b>Add a turn</b>'+
+      '<s>For a roll that never got entered</s></div>'+
+      '<button class="sec" style="padding:9px 14px" onclick="addTurn('+m.i+')">+ Add</button></div>';
+    body += '<div class="totline"><span>Total</span><span>'+total(p)+'</span></div>';
+    if (p.out) body += '<button class="sec" style="width:100%;margin-top:8px" onclick="unOut('+m.i+')">Bring '+esc(name(m.i))+' back into the game</button>';
+  }
+  else if (m.t === 'settings'){
+    title = 'House rules';
+    body = '<div class="card">'+
+      '<div class="setrow"><div class="t">Play to<s>First to reach this wins</s></div>'+
+        '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
+        '<button onclick="bumpTarget(25)">+</button></div></div>'+
+      settingsRows()+
+      '<div class="setrow"><div class="t">Rolls first<s>Applies to the next game</s></div>'+
+        '<button class="sec" style="padding:10px 12px" onclick="cycleFirst()">'+esc(firstLabel())+' \u203A</button>'+
+      '</div></div>';
+  }
+  else if (m.t === 'newgame'){
+    title = 'Start over?';
+    body = '<div class="empty">This clears every score.</div>'+
+      '<button class="big" onclick="closeModal();rematch()">Same players, fresh game</button>'+
+      '<div style="height:8px"></div>'+
+      '<button class="sec" style="width:100%" onclick="S.modal=null;S.screen=\'setup\';render()">Change players</button>';
+  }
+  return '<div class="scrim" onclick="if(event.target===this)closeModal()"><div class="sheet">'+
+    '<div class="sheethead"><h2>'+title+'</h2><button class="iconbtn" onclick="closeModal()">✕</button></div>'+
+    body+'</div></div>';
+}
+
+function editTurn(i,j,v){
+  var n = parseInt(v,10); if (isNaN(n)) n = 0;
+  S.players[i].turns[j].pts = n;
+  S.players[i].turns[j].note = 'Edited by hand';
+  render();
+}
+function delTurn(i,j){ S.players[i].turns.splice(j,1); render(); }
+function addTurn(i){ S.players[i].turns.push({pts:0, note:'Added by hand'}); render(); }
+function unOut(i){ S.players[i].out = false; render(); }
+
+load();
+render();
+</script>
+</body>
+</html>
