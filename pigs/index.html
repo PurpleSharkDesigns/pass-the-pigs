@@ -170,12 +170,13 @@
      grid holds a usable minimum and the scoreboard gives way, scrolling
      inside itself once there are more players than fit. */
   #app[data-screen="game"] .boardcard{flex:0 1 auto;min-height:46px;max-height:22vh;
-    overflow-y:auto;-webkit-overflow-scrolling:touch}
+    overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
   /* Both team totals must be visible at once — that race is the whole game.
      Side by side rather than stacked: halves the height and puts the two
      scores next to each other for direct comparison. */
   #app[data-screen="game"] .boardcard.teamcard{max-height:none;flex:0 0 auto;
-    display:grid;grid-template-columns:1fr 1fr;gap:7px;align-items:start}
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px;align-items:start}
   #app[data-screen="game"] .teamcard .tblock{margin-bottom:0}
   #app[data-screen="game"] .teamcard .edithint{grid-column:1/-1}
   #app[data-screen="game"] .teamcard .ttot{font-size:20px}
@@ -196,7 +197,8 @@
   #app[data-screen="game"] .pig svg{max-height:92px}
   /* past four players, run the scoreboard in two columns — halves its
      height, so eight players cost the same as four */
-  #app[data-screen="game"] .boardrows.two{display:grid;grid-template-columns:1fr 1fr;gap:4px 7px}
+  #app[data-screen="game"] .boardrows.two{display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 7px}
   #app[data-screen="game"] .boardrows.two .scorerow{margin-bottom:0;padding:5px 7px;gap:6px}
   #app[data-screen="game"] .boardrows.two .stot{font-size:17px;min-width:30px}
   #app[data-screen="game"] .boardrows.two .sname{font-size:13px}
@@ -288,6 +290,22 @@
   .rowbtns.three{grid-template-columns:1fr 1fr 1fr}
   .rowbtns.three .sec{padding:12px 4px;font-size:13px}
   .sec.hand{background:#FFF3E2;border-color:#F0D2A8;color:#8A5A00}
+
+  /* ---------- closest-to-target ---------- */
+  .banklock{display:grid;grid-template-columns:1.9fr 1fr;gap:8px}
+  .banklock .big{margin:0}
+  .big.lock{background:#8A5A00;color:#fff;font-size:15px;padding:16px 6px}
+  .big.lock:active{transform:scale(.985)}
+  .tag.lock{color:#7A5310;background:#FFEFC9}
+  .stot .dist,.ttot .dist{display:block;text-decoration:none;font-size:10px;font-weight:800;
+    letter-spacing:.04em;color:var(--muted);margin-top:-2px}
+  .scorerow.locked .dist{color:#8A5A00}
+  .scorerow.locked{opacity:.62}
+  .scorerow.locked .sbar i{background:#B9A99C}
+  .finalbar.soft{background:#F4F1EE;border-color:#E5DCD4;color:var(--muted)}
+  .sec.dice{padding:0;width:42px;height:42px;font-size:19px;line-height:1;flex:none;border-radius:13px}
+  .big.bustwarn{background:#C0392B;color:#fff}
+  .tag.bust{color:#fff;background:#C0392B}
 
   .tag.lead{color:#8A5A00;background:#FFF0CC}
   .tag.last{color:var(--muted);background:#F3ECE7}
@@ -447,8 +465,41 @@ var S = {
   teams:false,             // team mode: two teams, alternating turns
   winTeam:null,
   slot:null,               // whose turn slot it is (differs from cur after a hand off)
-  held:[]                  // who has held the pigs this turn — one hold each
+  held:[],                 // who has held the pigs this turn — one hold each
+  mode:'first',            // 'first' = first past the target · 'closest' = nearest to it
+  rolloff:null             // Happy Pigs in Poop — the tie-break
 };
+
+/* ---------- closest-to-target mode ---------- */
+function isClosest(){ return S.mode === 'closest'; }
+function scoreOf(i){ return S.teams ? teamTotal(teamOf(i)) : total(S.players[i]); }
+/* Distance is absolute — going over the target is exactly as bad as
+   falling the same amount short. */
+function distOf(i){ return Math.abs(scoreOf(i) - S.target); }
+/* Compact form for the scoreboard chips, where space is tight. */
+function distTag(v){
+  var d = v - S.target;
+  if (d === 0) return 'spot on';
+  return (d > 0 ? '+' : '\u2212') + Math.abs(d);
+}
+function distLabel(v){
+  var d = v - S.target;
+  if (d === 0) return 'spot on';
+  return Math.abs(d) + (d > 0 ? ' over' : ' under');
+}
+/* In team mode a lock closes the whole side, so locked-ness is asked of
+   the side rather than the individual. */
+function isLocked(i){ return !!S.players[i].locked; }
+function sideLocked(i){
+  if (!S.teams) return isLocked(i);
+  return teamMembers(teamOf(i)).every(isLocked);
+}
+function lockable(i){ return !S.players[i].out && !isLocked(i); }
+function liveCount(){
+  var n = 0;
+  S.players.forEach(function(p, i){ if (lockable(i)) n++; });
+  return n;
+}
 
 var TEAMS = ['Team A', 'Team B'];
 function teamOf(i){ return S.players[i].team === 1 ? 1 : 0; }
@@ -489,7 +540,8 @@ function save(){
       screen:S.screen, target:S.target, oinkerRule:S.oinkerRule, piggybackRule:S.piggybackRule,
       first:S.first, players:S.players, cur:S.cur, turnPts:S.turnPts, turnRolls:S.turnRolls,
       winner:S.winner, mute:S.mute, finalBy:S.finalBy,
-      teams:S.teams, winTeam:S.winTeam, slot:S.slot, held:S.held
+      teams:S.teams, winTeam:S.winTeam, slot:S.slot, held:S.held,
+      mode:S.mode, rolloff:S.rolloff
     }));
   } catch(e){}
 }
@@ -508,7 +560,8 @@ function load(){
     S.piggybackRule = d.piggybackRule || 'out';
     S.first = (d.first === 'random') ? 'random' : (d.first || 0);
     S.players = d.players.map(function(p){
-      var o = { name: p.name || '', out: !!p.out,
+      var o = { name: p.name || '', out: !!p.out, locked: !!p.locked,
+        turnsLeft: (typeof p.turnsLeft === 'number') ? p.turnsLeft : null,
         turns: (p.turns || []).map(function(t){ return {pts: t.pts|0, note: t.note || ''}; }) };
       /* left unset when never assigned, so switching Teams on still deals
          everyone out alternately rather than piling them all onto A */
@@ -525,6 +578,8 @@ function load(){
     S.winTeam = (typeof d.winTeam === 'number') ? d.winTeam : null;
     S.slot    = (typeof d.slot === 'number') ? d.slot : S.cur;
     S.held    = Array.isArray(d.held) ? d.held : [S.cur];
+    S.mode    = (d.mode === 'closest') ? 'closest' : 'first';
+    S.rolloff = d.rolloff || null;
   } catch(e){}
 }
 
@@ -1066,9 +1121,28 @@ function bank(){
   /* Reaching the target doesn't end it — it opens the final round,
      so everyone else gets one last turn to answer. Tracked against the
      turn slot, not the roller, since a hand off moves the roller. */
+  /* closest mode is blackjack: bank past the target and you are out */
+  if (isClosest()){
+    var sc = S.teams ? teamTotal(teamOf(S.cur)) : t;
+    if (sc > S.target){
+      var whoB = S.teams ? TEAMS[teamOf(S.cur)] : esc(name(S.cur));
+      bustOver(S.cur);
+      S.flash = {kind:'bad', title:'Bust! 🐷',
+                 sub:whoB+' went over with '+sc+' — out of the game'};
+      SFX.pigOut();
+      render(); fxShake(); fxTumble();
+      setTimeout(function(){ if (!closestEarlyEnd()) nextPlayer(true); }, 1050);
+      return;
+    }
+  }
+
   var reached = S.teams ? (teamTotal(teamOf(S.cur)) >= S.target) : (t >= S.target);
   var opened = false;
-  if (reached && S.finalBy === null){ S.finalBy = (S.slot === null ? S.cur : S.slot); opened = true; }
+  /* closest mode has no final round — passing the target isn't winning,
+     it's overshooting, and the countdown is started by a lock instead */
+  if (!isClosest() && reached && S.finalBy === null){
+    S.finalBy = (S.slot === null ? S.cur : S.slot); opened = true;
+  }
 
   SFX.bank();
   nextPlayer(false);
@@ -1102,21 +1176,175 @@ function handPrompt(){
   openModal({t:'hand'});
 }
 
+/* ---------- locking in (closest mode) ---------- */
+function countdownRunning(){
+  return S.players.some(function(p){ return typeof p.turnsLeft === 'number'; });
+}
+function startCountdown(){
+  /* everyone still live gets two more turns, then they're locked whether
+     they like it or not */
+  S.players.forEach(function(p, i){ if (lockable(i)) p.turnsLeft = 2; });
+}
+function lockSide(i){
+  var list = S.teams ? teamMembers(teamOf(i)) : [i];
+  list.forEach(function(k){
+    if (!S.players[k].out){ S.players[k].locked = true; S.players[k].turnsLeft = null; }
+  });
+}
+function lockIn(){
+  if (!isClosest() || !lockable(S.cur)) return;
+  var i = S.cur, who = S.teams ? TEAMS[teamOf(i)] : esc(name(i));
+  if (S.turnPts > 0){
+    S.players[i].turns.push({pts:S.turnPts,
+      note:'Banked · ' + S.turnRolls.length + ' roll' + (S.turnRolls.length===1?'':'s') + ', locked in'});
+  }
+  S.turnPts = 0; S.turnRolls = []; S.pending = null;
+  /* locking in banks what you were holding, which can itself tip you over */
+  if (scoreOf(i) > S.target){
+    var whoB = S.teams ? TEAMS[teamOf(i)] : esc(name(i));
+    var over = scoreOf(i);
+    bustOver(i);
+    S.flash = {kind:'bad', title:'Bust! 🐷', sub:whoB+' went over with '+over+' — out of the game'};
+    SFX.pigOut();
+    render(); fxShake(); fxTumble();
+    setTimeout(function(){ if (!closestEarlyEnd()) nextPlayer(true); }, 1050);
+    return;
+  }
+  var starts = !countdownRunning();
+  lockSide(i);
+  var sc = scoreOf(i);
+  if (starts) startCountdown();
+  SFX.bank();
+  nextPlayer(false);
+  if (S.screen !== 'game') return;
+  S.flash = {kind:'good', title:who + ' locked in 🔒',
+    sub: sc + ' · ' + distLabel(sc) + (starts ? ' — two turns each left' : ''), fx:'jackpot'};
+  render();
+  fxBurst(8, '🔒');
+}
+
 function nextPlayer(fromBust){
   S.turnPts = 0; S.turnRolls = []; S.pending = null;
   if (!fromBust) S.flash = null;
   /* advance from the slot, not the roller — a hand off must not skip anyone */
-  var n = S.players.length, i = (S.slot === null ? S.cur : S.slot), guard = 0;
-  do { i = (i + 1) % n; guard++; } while (S.players[i].out && guard <= n);
+  var from = (S.slot === null ? S.cur : S.slot);
+
+  if (isClosest()){
+    /* whoever just played spends one of their remaining turns */
+    var pl = S.players[from];
+    if (typeof pl.turnsLeft === 'number' && !pl.locked){
+      pl.turnsLeft -= 1;
+      if (pl.turnsLeft <= 0) lockSide(from);
+    }
+    if (liveCount() === 0){ endGame(); return; }
+  }
+
+  var n = S.players.length, i = from, guard = 0;
+  do { i = (i + 1) % n; guard++; }
+  while ((S.players[i].out || (isClosest() && isLocked(i))) && guard <= n);
   S.cur = i; S.slot = i; S.held = [i];
   if (fromBust) S.flash = null;
   /* play has come back round to whoever triggered it — everyone has answered */
-  if (S.finalBy !== null && i === S.finalBy){ endGame(); return; }
+  if (!isClosest() && S.finalBy !== null && i === S.finalBy){ endGame(); return; }
   render();
+}
+
+function declareWinner(i, byRolloff){
+  if (S.teams){ S.winTeam = teamOf(i); S.winner = null; }
+  else { S.winner = i; S.winTeam = null; }
+  S.wonByRolloff = !!byRolloff;
+  S.screen = 'win'; S.flash = null; S.rolloff = null;
+  SFX.win(); render(); fxConfetti();
+}
+
+/* Going over puts you out, so the winner is whoever sits closest under
+   the target. A dead heat goes to a roll-off rather than being split. */
+function bustOver(i){
+  var list = S.teams ? teamMembers(teamOf(i)) : [i];
+  list.forEach(function(k){
+    S.players[k].out = true; S.players[k].bust = true;
+    S.players[k].locked = false; S.players[k].turnsLeft = null;
+  });
+}
+/* Called after a bust: has that ended the game outright? */
+function closestEarlyEnd(){
+  var alive = [];
+  S.players.forEach(function(p, i){ if (!p.out) alive.push(i); });
+  if (!alive.length){ finishClosest(); return true; }          // everyone went over
+  if (S.teams){
+    if (teamOut(0) || teamOut(1)){ finishClosest(); return true; }
+  } else if (alive.length === 1){
+    declareWinner(alive[0]); return true;                      // last one standing
+  }
+  return false;
+}
+function finishClosest(){
+  var best = Infinity, cands = [], seen = {};
+  S.players.forEach(function(p, i){
+    if (p.out) return;                                         // busted or knocked out
+    var key = S.teams ? ('t' + teamOf(i)) : ('p' + i);
+    if (seen[key]) return;
+    seen[key] = true;
+    var d = distOf(i);
+    if (d < best){ best = d; cands = [i]; }
+    else if (d === best) cands.push(i);
+  });
+
+  if (!cands.length){
+    /* Nobody survived. Rather than declaring no winner, the smallest
+       overshoot takes it — least bad wins. */
+    var over = Infinity, seen2 = {};
+    S.players.forEach(function(p, i){
+      var key = S.teams ? ('t' + teamOf(i)) : ('p' + i);
+      if (seen2[key]) return;
+      seen2[key] = true;
+      var d = scoreOf(i) - S.target;
+      if (d < over){ over = d; cands = [i]; }
+      else if (d === over) cands.push(i);
+    });
+  }
+
+  if (!cands.length){ declareWinner(0); return; }
+  if (cands.length > 1){ startRolloff(cands); return; }
+  declareWinner(cands[0]);
+}
+
+/* ---------- Happy Pigs in Poop ---------- */
+function startRolloff(list){
+  S.rolloff = {players:list.slice(), scores:{}, turn:0, pending:null, round:1, last:null};
+  S.screen = 'rolloff'; S.flash = null; S.modal = null;
+  SFX.start(); render();
+}
+function rollPick(pose){
+  var r = S.rolloff; if (!r) return;
+  if (r.pending === null){ r.pending = pose; SFX.tap(); render(); return; }
+  var res = score(r.pending, pose);
+  var pts = res.pigOut ? 0 : res.pts;
+  var who = r.players[r.turn];
+  r.scores[who] = pts;
+  r.last = {who:who, text: res.pigOut ? 'Pig Out — nothing' : res.label + ' · ' + pts};
+  r.pending = null;
+  if (res.pigOut) SFX.pigOut(); else SFX.roll(pts);
+  r.turn++;
+  if (r.turn < r.players.length){ render(); return; }
+
+  var best = -1, win = [];
+  r.players.forEach(function(i){
+    var v = r.scores[i];
+    if (v > best){ best = v; win = [i]; } else if (v === best) win.push(i);
+  });
+  render();
+  if (win.length === 1){ setTimeout(function(){ declareWinner(win[0], true); }, 1100); return; }
+  setTimeout(function(){                                  /* still level — go again */
+    S.rolloff = {players:win, scores:{}, turn:0, pending:null,
+                 round:r.round + 1, last:null};
+    SFX.start(); render();
+  }, 1300);
 }
 
 /* Highest total takes it. A tie goes to whoever got there first. */
 function endGame(){
+  if (isClosest()){ finishClosest(); return; }
   if (S.teams){
     var bestT = -Infinity, bt = null;
     [0,1].forEach(function(t){
@@ -1211,6 +1439,7 @@ function render(){
   var h = '';
   if (S.screen === 'setup') h = viewSetup();
   else if (S.screen === 'win') h = viewWin();
+  else if (S.screen === 'rolloff') h = viewRolloff();
   else h = viewGame();
   if (S.modal) h += viewModal();
   var a = document.getElementById('app');
@@ -1281,9 +1510,7 @@ function viewSetup(){
         '</div></div>'+
     '</div>'+
     '<div class="card">'+
-      '<div class="setrow"><div class="t">Play to<s>First to reach this wins</s></div>'+
-        '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
-        '<button onclick="bumpTarget(25)">+</button></div></div>'+
+      targetRow()+
       settingsRows()+
     '</div>'+
     '<button class="big" onclick="startGame()"'+(S.teams && !teamsReady() ? ' disabled' : '')+'>'+
@@ -1315,8 +1542,53 @@ function chooseMode(on){
   render();
 }
 
+/* A random target is what makes "closest" worth playing — nobody can aim
+   at a number they already know, and an awkward one like 83 forces you to
+   creep up on it with Siders instead of coasting in on a Double. */
+function randomTarget(){
+  var t, guard = 0;
+  do { t = 55 + Math.floor(Math.random() * 91); guard++; }   /* 55–145 */
+  while (t === S.target && guard < 20);
+  S.target = t;
+  SFX.tap();
+  render();
+}
+
+/* true when banking what you're holding would tip you past the target */
+function willBust(){
+  if (!isClosest() || S.turnPts <= 0) return false;
+  return scoreOf(S.cur) + S.turnPts > S.target;
+}
+
+function targetRow(){
+  return '<div class="setrow"><div class="t">Play to<s>'+
+      (isClosest() ? 'Get close without going over' : 'First to reach this wins')+'</s></div>'+
+    '<div style="display:flex;gap:7px;align-items:center">'+
+      '<button class="sec dice" onclick="randomTarget()" aria-label="Random target">🎲</button>'+
+      '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
+      '<button onclick="bumpTarget(25)">+</button></div>'+
+    '</div></div>';
+}
+
+function setTargetMode(m){
+  S.mode = (m === 'closest') ? 'closest' : 'first';
+  if (isClosest()){
+    S.finalBy = null;                       /* no final round in closest mode */
+  } else {
+    S.players.forEach(function(p){ p.locked = false; p.turnsLeft = null; });
+    S.rolloff = null;
+  }
+  render();
+}
+
 function settingsRows(){
-  return '<div class="setrow"><div class="t">Oinker<s>Pigs touching</s></div>'+
+  return '<div class="setrow"><div class="t">Target<s>'+
+      (isClosest() ? 'Closest under it wins · over and you are out' : 'First to reach it wins')+'</s></div>'+
+      '<div class="seg">'+
+        '<button class="'+(isClosest()?'':'on')+'" onclick="setTargetMode(\'first\')">First past</button>'+
+        '<button class="'+(isClosest()?'on':'')+'" onclick="setTargetMode(\'closest\')">🎯 Closest</button>'+
+      '</div></div>'+
+    '<div class="setrow"><div class="t">Oinker<s>Pigs touching</s></div>'+
       '<div class="seg">'+
         '<button class="'+(S.oinkerRule==='zero'?'on':'')+'" onclick="S.oinkerRule=\'zero\';render()">Lose all</button>'+
         '<button class="'+(S.oinkerRule==='turn'?'on':'')+'" onclick="S.oinkerRule=\'turn\';render()">Lose turn</button>'+
@@ -1347,7 +1619,7 @@ function firstLabel(){ return S.first === 'random' ? '\ud83c\udfb2 Random' : nam
 function bumpTarget(d){ S.target = Math.max(25, Math.min(500, S.target + d)); render(); }
 function startGame(){
   S.players.forEach(function(p,i){ if(!p.name.trim()) p.name = 'Player '+(i+1);
-    p.turns = []; p.out = false; });
+    p.turns = []; p.out = false; p.locked = false; p.turnsLeft = null; });
 
   var start = firstIndex();
   if (S.teams){
@@ -1369,7 +1641,7 @@ function startGame(){
 
   S.cur = start; S.slot = start; S.held = [start];
   S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  S.winner = null; S.winTeam = null; S.finalBy = null;
+  S.winner = null; S.winTeam = null; S.finalBy = null; S.rolloff = null; S.wonByRolloff = false;
   S.screen = 'game'; SFX.start(); render();
 }
 
@@ -1392,7 +1664,8 @@ function teamBoard(){
       '<div class="thead"><span class="tnm">'+TEAMS[t]+'</span>'+
         (S.finalBy!==null && teamOf(S.finalBy)===t ? '<span class="tag lead">🏁</span>' : '')+
         (S.finalBy!==null && teamOf(S.finalBy)!==t ? '<span class="tag last">last turn</span>' : '')+
-        '<span class="ttot">'+tot+'</span></div>'+
+        '<span class="ttot">'+tot+
+          (isClosest() && !teamOut(t) ? '<s class="dist">'+distTag(tot)+'</s>' : '')+'</span></div>'+
       '<div class="sbar"><i style="width:'+pct+'%"></i></div>'+
       '<div class="mems">'+chips+'</div></div>';
   }).join('');
@@ -1402,13 +1675,20 @@ function viewGame(){
   var board = S.players.map(function(p,i){
     var t = total(p);
     var pct = Math.max(0, Math.min(100, t / S.target * 100));
-    return '<div class="scorerow '+(i===S.cur?'cur':'')+(p.out?' out':'')+'" onclick="openModal({t:\'hist\',i:'+i+'})">'+
+    return '<div class="scorerow '+(i===S.cur?'cur':'')+(p.out?' out':'')+
+      (isClosest() && isLocked(i)?' locked':'')+'" onclick="openModal({t:\'hist\',i:'+i+'})">'+
       '<div style="flex:1;min-width:0">'+
-        '<div class="sname">'+esc(name(i))+(p.out?'<span class="tag">out</span>':'')+
-          (S.finalBy===i?'<span class="tag lead">🏁 reached '+S.target+'</span>':'')+
-          (S.finalBy!==null && S.finalBy!==i && !p.out?'<span class="tag last">last turn</span>':'')+'</div>'+
+        '<div class="sname">'+esc(name(i))+
+            (p.out?'<span class="tag'+(p.bust?' bust':'')+'">'+(p.bust?'bust':'out')+'</span>':'')+
+          (isClosest() && isLocked(i)?'<span class="tag lock">🔒</span>':'')+
+          (isClosest() && !isLocked(i) && !p.out && typeof p.turnsLeft === 'number'
+            ? '<span class="tag last">'+p.turnsLeft+' left</span>' : '')+
+
+          (!isClosest() && S.finalBy===i?'<span class="tag lead">🏁 reached '+S.target+'</span>':'')+
+          (!isClosest() && S.finalBy!==null && S.finalBy!==i && !p.out?'<span class="tag last">last turn</span>':'')+'</div>'+
         '<div class="sbar"><i style="width:'+pct+'%"></i></div>'+
-      '</div><div class="stot">'+t+'</div></div>';
+      '</div><div class="stot">'+t+
+        (isClosest() && !p.out ? '<s class="dist">'+distTag(t)+'</s>' : '')+'</div></div>';
   }).join('');
 
   var flash = S.flash ? '<div class="flash '+(S.flash.kind==='good'?'good':'bad')+
@@ -1427,8 +1707,17 @@ function viewGame(){
 
   /* Kept short so it stays one line, and dropped entirely while a flash is
      up — the 🏁 tag on the scoreboard still says who triggered it. */
-  var finalbar = (S.finalBy === null || S.flash) ? '' :
-    '<div class="finalbar">🏁 <b>Final round</b> — last turn for everyone else</div>';
+  var finalbar = '';
+  if (!S.flash){
+    if (isClosest() && countdownRunning())
+      finalbar = '<div class="finalbar">🔒 <b>Two turns each left</b> — then closest under '+S.target+'</div>';
+    /* The explainer only earns its height while it's still news. Once
+       anyone has banked, the per-player numbers say it better. */
+    else if (isClosest() && S.players.every(function(q){ return !q.turns.length; }))
+      finalbar = '<div class="finalbar soft">🎯 <b>Closest under '+S.target+'</b> — go over and you\'re out</div>';
+    else if (S.finalBy !== null)
+      finalbar = '<div class="finalbar">🏁 <b>Final round</b> — last turn for everyone else</div>';
+  }
 
   var hands = handCandidates();
   var canHand = S.teams && S.turnPts > 0 && hands.length > 0;
@@ -1450,8 +1739,15 @@ function viewGame(){
         '<button onclick="oinker()">Oinker 🥓<b>pigs touching</b></button>'+
         '<button onclick="piggyback()">Piggyback<b>one on the other</b></button>'+
       '</div></div>'+
-    '<button class="big green" onclick="bank()" '+(S.turnPts===0?'disabled':'')+'>'+
-      (S.turnPts===0 ? 'Bank points' : 'Bank '+S.turnPts+' & pass the pigs')+'</button>'+
+    (isClosest()
+      ? '<div class="banklock">'+
+          '<button class="big '+(willBust()?'bustwarn':'green')+'" onclick="bank()" '+
+            (S.turnPts===0?'disabled':'')+'>'+
+            (S.turnPts===0 ? 'Bank' : (willBust() ? 'Bank '+S.turnPts+' → BUST' : 'Bank '+S.turnPts))+'</button>'+
+          '<button class="big lock" onclick="lockIn()">🔒 Lock in</button>'+
+        '</div>'
+      : '<button class="big green" onclick="bank()" '+(S.turnPts===0?'disabled':'')+'>'+
+          (S.turnPts===0 ? 'Bank points' : 'Bank '+S.turnPts+' & pass the pigs')+'</button>')+
     '<div class="rowbtns'+(canHand?' three':'')+'">'+
       '<button class="sec" onclick="undoRoll()" '+(!S.turnRolls.length && S.pending===null?'disabled':'')+'>↶ Undo roll</button>'+
       (canHand ? '<button class="sec hand" onclick="handPrompt()">🤝 Hand off</button>' : '')+
@@ -1461,9 +1757,56 @@ function viewGame(){
 }
 function confirmSkip(){ S.flash = null; SFX.skip(); return true; }
 
+/* ---------- HAPPY PIGS IN POOP ---------- */
+function viewRolloff(){
+  var r = S.rolloff, done = r.turn >= r.players.length;
+  var rows = r.players.map(function(i){
+    var v = r.scores[i];
+    var isNow = !done && r.players[r.turn] === i;
+    return '<div class="scorerow '+(isNow?'cur':'')+'">'+
+      '<div class="sname" style="flex:1">'+esc(name(i))+
+        (S.teams?'<span class="tag">'+TEAMS[teamOf(i)]+'</span>':'')+
+        (isNow?'<span class="tag lead">throwing</span>':'')+'</div>'+
+      '<div class="stot">'+(v === undefined ? '–' : v)+'</div></div>';
+  }).join('');
+
+  var body;
+  if (done){
+    body = '<div class="empty">Counting the pigs…</div>';
+  } else {
+    var lead = r.pending === null
+      ? '<span class="step">'+esc(name(r.players[r.turn]))+' — where did pig 1 land?</span>'
+      : '<span class="step">And pig 2?</span><span class="chip" onclick="S.rolloff.pending=null;render()">'+
+        pigSVG(r.pending)+POS[r.pending].name+' ✕</span>';
+    var grid = ORDER.map(function(k){
+      return '<button class="pig" onclick="rollPick(\''+k+'\')">'+pigSVG(k)+
+        '<b>'+POS[k].name+'</b><s>'+POS[k].sub+'</s></button>';
+    }).join('');
+    body = '<div class="picklead">'+lead+'</div><div class="grid">'+grid+'</div>';
+  }
+
+  var last = r.last ? '<div class="flash good"><div>'+esc(name(r.last.who))+': '+r.last.text+'</div></div>' : '';
+
+  return header(false)+
+    '<div class="finalbar" style="text-align:center">🐷💩 <b>Happy Pigs in Poop</b> — '+
+      'dead heat, so one throw each'+(r.round > 1 ? ' · round '+r.round : '')+'</div>'+
+    '<div class="card boardcard" style="padding:10px">'+rows+'</div>'+
+    last+
+    '<div class="card pickcard">'+body+'</div>';
+}
+
 /* ---------- WIN ---------- */
 function viewWin(){
   var w = S.winner, headline, sub;
+  /* If the state ever gets out of step — a mode switched after a win, a
+     half-restored save — say something neutral instead of throwing on a
+     player index that isn't there. */
+  if (!(S.teams && S.winTeam !== null) && (w === null || w === undefined || !S.players[w])){
+    return header(false)+
+      '<div class="card win"><div class="crown">🏆</div><h2>Game over</h2>'+
+      '<p>Played to '+S.target+'</p>'+
+      '<button class="big" onclick="S.screen=\'setup\';render()">Back to setup</button></div>';
+  }
   if (S.teams && S.winTeam !== null){
     var wt = S.winTeam;
     headline = TEAMS[wt]+' wins!';
@@ -1474,6 +1817,12 @@ function viewWin(){
     headline = esc(name(w))+' wins!';
     sub = total(S.players[w])+' points · played to '+S.target+
       (S.finalBy !== null && S.finalBy !== w ? ' · stole it on the final round' : '');
+  }
+  if (isClosest()){
+    var wi = (S.teams && S.winTeam !== null) ? teamMembers(S.winTeam)[0] : w;
+    var sc = scoreOf(wi);
+    sub = sc+' · '+distLabel(sc)+' of '+S.target+
+      (S.wonByRolloff ? ' · won it in Happy Pigs in Poop 🐷💩' : '');
   }
   return header(false)+
     '<div class="card win"><div class="crown">🏆</div>'+
@@ -1492,11 +1841,12 @@ function viewWin(){
       }).join('')) +'</div>';
 }
 function rematch(){
-  S.players.forEach(function(p){ p.turns = []; p.out = false; });
+  S.players.forEach(function(p){ p.turns = []; p.out = false; p.locked = false; p.turnsLeft = null; });
   var start = firstIndex();
   S.cur = start; S.slot = start; S.held = [start];
   S.turnPts = 0; S.turnRolls = []; S.pending = null; S.flash = null;
-  S.winner = null; S.winTeam = null; S.finalBy = null; S.screen = 'game'; SFX.start(); render();
+  S.winner = null; S.winTeam = null; S.finalBy = null; S.rolloff = null; S.wonByRolloff = false;
+  S.screen = 'game'; SFX.start(); render();
 }
 
 /* ---------- MODALS ---------- */
@@ -1547,9 +1897,7 @@ function viewModal(){
           '<button class="'+(S.teams?'':'on')+'" onclick="chooseMode(false)">Solo</button>'+
           '<button class="'+(S.teams?'on':'')+'" onclick="chooseMode(true)">🐷 Teams</button>'+
         '</div></div>'+
-      '<div class="setrow"><div class="t">Play to<s>First to reach this wins</s></div>'+
-        '<div class="stepper"><button onclick="bumpTarget(-25)">–</button><span>'+S.target+'</span>'+
-        '<button onclick="bumpTarget(25)">+</button></div></div>'+
+      targetRow()+
       settingsRows()+
       '<div class="setrow"><div class="t">Rolls first<s>Applies to the next game</s></div>'+
         '<button class="sec" style="padding:10px 12px" onclick="cycleFirst()">'+esc(firstLabel())+' \u203A</button>'+
